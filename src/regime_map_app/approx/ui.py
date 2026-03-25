@@ -183,7 +183,10 @@ class ApproxModuleWidget(QWidget):
         self.open_folder_button.clicked.connect(self.open_output_folder)
 
     def current_input_mode(self) -> InputMode:
-        return self.mode_combo.currentData()
+        mode = self.mode_combo.currentData()
+        if isinstance(mode, InputMode):
+            return mode
+        return InputMode(mode)
 
     def collect_config(self) -> ApproxJobConfig:
         output_dir_text = self.output_dir_edit.text().strip()
@@ -243,8 +246,8 @@ class ApproxModuleWidget(QWidget):
                 self.append_log(error)
             return
 
-        validation = self.pipeline.validate_inputs(config)
-        if not validation.is_valid:
+        validation = self.pipeline.validate_inputs(config) if config.input_mode.is_single else None
+        if validation is not None and not validation.is_valid:
             self.status_label.setText("Статус: запуск отменён")
             for error in validation.errors:
                 self.append_log(error)

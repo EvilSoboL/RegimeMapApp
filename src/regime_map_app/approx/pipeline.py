@@ -146,11 +146,11 @@ class ApproxPipeline:
         if not run_validation.is_valid:
             raise ValidationError("\n".join(run_validation.errors))
 
-        validation = self.validate_inputs(config)
-        if not validation.is_valid:
-            raise ValidationError("\n".join(validation.errors))
-
         input_paths = normalize_input_paths(config)
+        if config.input_mode.is_single:
+            validation = self.validate_inputs(config)
+            if not validation.is_valid:
+                raise ValidationError("\n".join(validation.errors))
         try:
             config.output_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
