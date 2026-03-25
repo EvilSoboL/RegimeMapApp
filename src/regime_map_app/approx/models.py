@@ -27,7 +27,6 @@ ALLOWED_KERNELS = (
 
 class InputMode(str, Enum):
     SINGLE_FILE = "single_file"
-    MULTI_FILES = "multi_files"
     FOLDER_BATCH = "folder_batch"
 
     @property

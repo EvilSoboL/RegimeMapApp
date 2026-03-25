@@ -86,7 +86,7 @@ def validate_job_config(config: ApproxJobConfig, *, require_output_dir: bool = T
     errors: list[str] = []
 
     if not config.input_paths:
-        errors.append("Не выбран входной файл, набор файлов или папка.")
+        errors.append("Не выбран входной файл или папка.")
 
     if require_output_dir and config.output_dir is None:
         errors.append("Не выбрана выходная директория.")
@@ -104,9 +104,6 @@ def validate_job_config(config: ApproxJobConfig, *, require_output_dir: bool = T
 
     if config.input_mode is InputMode.SINGLE_FILE and len(config.input_paths) != 1:
         errors.append("В режиме одиночного файла нужно выбрать ровно один CSV.")
-
-    if config.input_mode is InputMode.MULTI_FILES and len(config.input_paths) < 1:
-        errors.append("В режиме нескольких файлов нужно выбрать хотя бы один CSV.")
 
     if config.input_mode is InputMode.FOLDER_BATCH and len(config.input_paths) != 1:
         errors.append("В режиме пакетной обработки нужно выбрать одну папку.")

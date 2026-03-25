@@ -11,6 +11,7 @@ pytest.importorskip("pytestqt")
 from PySide6.QtCore import Qt
 
 ApproxModuleWidget = import_module("regime_map_app.approx.ui").ApproxModuleWidget
+InputMode = import_module("regime_map_app.approx.models").InputMode
 
 
 def _write_valid_csv(path: Path) -> None:
@@ -42,6 +43,19 @@ def test_run_button_is_disabled_until_form_is_valid(qtbot, tmp_path: Path) -> No
     widget.set_output_dir(tmp_path / "out")
 
     assert widget.run_button.isEnabled()
+
+
+def test_input_mode_has_only_file_and_folder_with_single_select_button(qtbot) -> None:
+    widget = ApproxModuleWidget()
+    qtbot.addWidget(widget)
+
+    modes = [widget.mode_combo.itemData(index) for index in range(widget.mode_combo.count())]
+
+    assert modes == [
+        InputMode.SINGLE_FILE,
+        InputMode.FOLDER_BATCH,
+    ]
+    assert widget.select_input_button.text() == "Выбрать"
 
 
 def test_validate_button_shows_russian_error_in_log(qtbot, tmp_path: Path) -> None:

@@ -58,7 +58,6 @@ class ApproxModuleWidget(QWidget):
         form_layout = QFormLayout()
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("Одиночный файл", InputMode.SINGLE_FILE)
-        self.mode_combo.addItem("Несколько файлов", InputMode.MULTI_FILES)
         self.mode_combo.addItem("Папка", InputMode.FOLDER_BATCH)
         form_layout.addRow("Режим:", self.mode_combo)
 
@@ -68,12 +67,8 @@ class ApproxModuleWidget(QWidget):
         layout.addLayout(form_layout)
 
         buttons_layout = QHBoxLayout()
-        self.select_file_button = QPushButton("Выбрать файл")
-        self.select_files_button = QPushButton("Выбрать файлы")
-        self.select_folder_button = QPushButton("Выбрать папку")
-        buttons_layout.addWidget(self.select_file_button)
-        buttons_layout.addWidget(self.select_files_button)
-        buttons_layout.addWidget(self.select_folder_button)
+        self.select_input_button = QPushButton("Выбрать")
+        buttons_layout.addWidget(self.select_input_button)
         layout.addLayout(buttons_layout)
         return group
 
@@ -168,9 +163,7 @@ class ApproxModuleWidget(QWidget):
         self.mode_combo.currentIndexChanged.connect(self.refresh_form_state)
         self.auto_output_name_checkbox.toggled.connect(self._update_output_name_state)
         self.auto_output_name_checkbox.toggled.connect(self.refresh_form_state)
-        self.select_file_button.clicked.connect(self._choose_single_file)
-        self.select_files_button.clicked.connect(self._choose_multiple_files)
-        self.select_folder_button.clicked.connect(self._choose_folder)
+        self.select_input_button.clicked.connect(self._choose_input)
         self.select_output_dir_button.clicked.connect(self._choose_output_dir)
         self.output_name_edit.textChanged.connect(self.refresh_form_state)
         self.resolution_x_spin.valueChanged.connect(self.refresh_form_state)
@@ -295,17 +288,14 @@ class ApproxModuleWidget(QWidget):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_summary.output_dir)))
 
-    def _choose_single_file(self) -> None:
-        file_name, _ = QFileDialog.getOpenFileName(self, "Выбрать CSV", filter="CSV Files (*.csv)")
-        if file_name:
-            self.set_input_paths([Path(file_name)])
+    def _choose_input(self) -> None:
+        mode = self.current_input_mode()
+        if mode is InputMode.SINGLE_FILE:
+            file_name, _ = QFileDialog.getOpenFileName(self, "Выбрать CSV", filter="CSV Files (*.csv)")
+            if file_name:
+                self.set_input_paths([Path(file_name)])
+            return
 
-    def _choose_multiple_files(self) -> None:
-        file_names, _ = QFileDialog.getOpenFileNames(self, "Выбрать CSV", filter="CSV Files (*.csv)")
-        if file_names:
-            self.set_input_paths([Path(path) for path in file_names])
-
-    def _choose_folder(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "Выбрать папку с CSV")
         if directory:
             self.set_input_paths([Path(directory)])
@@ -322,10 +312,9 @@ class ApproxModuleWidget(QWidget):
             return
         if mode is InputMode.SINGLE_FILE:
             self.input_path_edit.setText(str(self._selected_input_paths[0]))
-        elif mode is InputMode.MULTI_FILES:
-            self.input_path_edit.setText(f"Выбрано файлов: {len(self._selected_input_paths)}")
-        else:
-            self.input_path_edit.setText(str(self._selected_input_paths[0]))
+            return
+
+        self.input_path_edit.setText(str(self._selected_input_paths[0]))
 
     def _sync_output_name_preview(self) -> None:
         mode = self.current_input_mode()
@@ -342,9 +331,7 @@ class ApproxModuleWidget(QWidget):
 
     def _update_mode_state(self) -> None:
         mode = self.current_input_mode()
-        self.select_file_button.setEnabled(mode is InputMode.SINGLE_FILE and not self._busy)
-        self.select_files_button.setEnabled(mode is InputMode.MULTI_FILES and not self._busy)
-        self.select_folder_button.setEnabled(mode is InputMode.FOLDER_BATCH and not self._busy)
+        self.select_input_button.setEnabled(not self._busy)
         self.auto_output_name_checkbox.setEnabled(mode.is_single and not self._busy)
         self._sync_input_summary()
         self._sync_output_name_preview()
@@ -360,9 +347,7 @@ class ApproxModuleWidget(QWidget):
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         self.mode_combo.setEnabled(not busy)
-        self.select_file_button.setEnabled(not busy and self.current_input_mode() is InputMode.SINGLE_FILE)
-        self.select_files_button.setEnabled(not busy and self.current_input_mode() is InputMode.MULTI_FILES)
-        self.select_folder_button.setEnabled(not busy and self.current_input_mode() is InputMode.FOLDER_BATCH)
+        self.select_input_button.setEnabled(not busy)
         self.select_output_dir_button.setEnabled(not busy)
         self.auto_output_name_checkbox.setEnabled(not busy and self.current_input_mode().is_single)
         self.output_name_edit.setEnabled(
