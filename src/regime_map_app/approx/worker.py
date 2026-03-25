@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from regime_map_app.approx.exceptions import ApproximationError, CancellationError
-from regime_map_app.approx.models import ApproxJobConfig
-from regime_map_app.approx.pipeline import ApproxPipeline
+from .exceptions import ApproximationError, CancellationError
+from .models import ApproxJobConfig
+from .pipeline import ApproxPipeline
 
 
 class ApproxWorker(QObject):

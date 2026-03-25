@@ -4,8 +4,8 @@ import re
 from datetime import date
 from pathlib import Path
 
-from regime_map_app.approx.exceptions import ValidationError
-from regime_map_app.approx.models import (
+from .exceptions import ValidationError
+from .models import (
     ALLOWED_KERNELS,
     ApproxJobConfig,
     FileMetadata,

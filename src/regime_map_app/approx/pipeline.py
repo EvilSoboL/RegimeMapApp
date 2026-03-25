@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Sequence
 
-from regime_map_app.approx.backend import ApproximationBackend, ScipyApproximationBackend
-from regime_map_app.approx.exceptions import ApproximationError, CancellationError, ProcessingError, ValidationError
-from regime_map_app.approx.models import ApproxJobConfig, BatchProcessSummary, FileProcessResult, ValidationResult
-from regime_map_app.approx.validation import (
+from .backend import ApproximationBackend, ScipyApproximationBackend
+from .exceptions import ApproximationError, CancellationError, ProcessingError, ValidationError
+from .models import ApproxJobConfig, BatchProcessSummary, FileProcessResult, ValidationResult
+from .validation import (
     normalize_input_paths,
     parse_file_metadata,
     resolve_output_path,

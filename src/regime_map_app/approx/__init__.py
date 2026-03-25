@@ -1,6 +1,6 @@
-from regime_map_app.approx.backend import ApproximationBackend, ScipyApproximationBackend
-from regime_map_app.approx.models import ApproxJobConfig, InputMode
-from regime_map_app.approx.pipeline import ApproxPipeline
+from .backend import ApproximationBackend, ScipyApproximationBackend
+from .models import ApproxJobConfig, InputMode
+from .pipeline import ApproxPipeline
 
 __all__ = [
     "ApproximationBackend",

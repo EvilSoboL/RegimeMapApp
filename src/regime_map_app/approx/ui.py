@@ -22,10 +22,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from regime_map_app.approx.models import ALLOWED_KERNELS, ApproxJobConfig, BatchProcessSummary, InputMode
-from regime_map_app.approx.pipeline import ApproxPipeline
-from regime_map_app.approx.validation import generate_output_filename, validate_job_config
-from regime_map_app.approx.worker import ApproxWorker
+from .models import ALLOWED_KERNELS, ApproxJobConfig, BatchProcessSummary, InputMode
+from .pipeline import ApproxPipeline
+from .validation import generate_output_filename, validate_job_config
+from .worker import ApproxWorker
 
 
 class ApproxModuleWidget(QWidget):

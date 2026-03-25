@@ -8,8 +8,8 @@ import pandas as pd
 from scipy.interpolate import RBFInterpolator
 from scipy.ndimage import median_filter
 
-from regime_map_app.approx.exceptions import CsvValidationError, ProcessingError
-from regime_map_app.approx.models import ApproxJobConfig, CSV_SEPARATOR, REQUIRED_COLUMNS, SurfaceGrid
+from .exceptions import CsvValidationError, ProcessingError
+from .models import ApproxJobConfig, CSV_SEPARATOR, REQUIRED_COLUMNS, SurfaceGrid
 
 
 class ApproximationBackend(Protocol):
