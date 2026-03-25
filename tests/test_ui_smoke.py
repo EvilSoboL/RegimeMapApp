@@ -47,6 +47,31 @@ def test_run_button_is_disabled_until_form_is_valid(qtbot, tmp_path: Path) -> No
     assert widget.run_button.isEnabled()
 
 
+def test_selecting_file_sets_output_dir_to_file_parent(qtbot, tmp_path: Path) -> None:
+    widget = ApproxModuleWidget()
+    qtbot.addWidget(widget)
+
+    input_file = tmp_path / "waste_oil-steam-CO-13-03-2026.csv"
+    _write_valid_csv(input_file)
+
+    widget.set_input_paths([input_file])
+
+    assert widget.output_dir_edit.text() == str(tmp_path)
+
+
+def test_selecting_folder_sets_output_dir_to_same_folder(qtbot, tmp_path: Path) -> None:
+    widget = ApproxModuleWidget()
+    qtbot.addWidget(widget)
+
+    input_folder = tmp_path / "batch"
+    input_folder.mkdir()
+    widget.mode_combo.setCurrentIndex(1)
+
+    widget.set_input_paths([input_folder])
+
+    assert widget.output_dir_edit.text() == str(input_folder)
+
+
 def test_input_mode_has_only_file_and_folder_with_single_select_button(qtbot) -> None:
     widget = ApproxModuleWidget()
     qtbot.addWidget(widget)

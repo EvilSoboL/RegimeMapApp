@@ -102,12 +102,12 @@ class ApproxModuleWidget(QWidget):
         self.resolution_x_spin = QSpinBox()
         self.resolution_x_spin.setRange(1, 10_000)
         self.resolution_x_spin.setValue(100)
-        layout.addRow("resolution_x:", self.resolution_x_spin)
+        layout.addRow("Разрешение оси x:", self.resolution_x_spin)
 
         self.resolution_y_spin = QSpinBox()
         self.resolution_y_spin.setRange(1, 10_000)
         self.resolution_y_spin.setValue(100)
-        layout.addRow("resolution_y:", self.resolution_y_spin)
+        layout.addRow("Разрешение оси y:", self.resolution_y_spin)
 
         self.kernel_combo = QComboBox()
         self.kernel_combo.addItems(ALLOWED_KERNELS)
@@ -201,6 +201,7 @@ class ApproxModuleWidget(QWidget):
 
     def set_input_paths(self, paths: list[Path] | tuple[Path, ...]) -> None:
         self._selected_input_paths = tuple(paths)
+        self._sync_output_dir_from_input()
         self._sync_input_summary()
         self._sync_output_name_preview()
         self.refresh_form_state()
@@ -315,6 +316,14 @@ class ApproxModuleWidget(QWidget):
             return
 
         self.input_path_edit.setText(str(self._selected_input_paths[0]))
+
+    def _sync_output_dir_from_input(self) -> None:
+        if not self._selected_input_paths:
+            return
+
+        source_path = self._selected_input_paths[0]
+        output_dir = source_path.parent if self.current_input_mode().is_single else source_path
+        self.output_dir_edit.setText(str(output_dir))
 
     def _sync_output_name_preview(self) -> None:
         mode = self.current_input_mode()
