@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt
 
-from regime_map_app.approx.ui import ApproxModuleWidget
+ApproxModuleWidget = import_module("regime_map_app.approx.ui").ApproxModuleWidget
 
 
 def _write_valid_csv(path: Path) -> None:

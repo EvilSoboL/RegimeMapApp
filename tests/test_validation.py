@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 
-from regime_map_app.approx.models import ApproxJobConfig, InputMode
-from regime_map_app.approx.validation import (
-    generate_output_filename,
-    normalize_input_paths,
-    parse_file_metadata,
-    validate_job_config,
-)
+models = import_module("regime_map_app.approx.models")
+validation = import_module("regime_map_app.approx.validation")
+
+ApproxJobConfig = models.ApproxJobConfig
+InputMode = models.InputMode
+generate_output_filename = validation.generate_output_filename
+normalize_input_paths = validation.normalize_input_paths
+parse_file_metadata = validation.parse_file_metadata
+validate_job_config = validation.validate_job_config
 
 
 def test_parse_file_metadata_reads_expected_fields() -> None:

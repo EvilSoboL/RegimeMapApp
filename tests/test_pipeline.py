@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 
 import pandas as pd
 
-from regime_map_app.approx.models import ApproxJobConfig, InputMode
-from regime_map_app.approx.pipeline import ApproxPipeline
+models = import_module("regime_map_app.approx.models")
+pipeline_module = import_module("regime_map_app.approx.pipeline")
+
+ApproxJobConfig = models.ApproxJobConfig
+InputMode = models.InputMode
+ApproxPipeline = pipeline_module.ApproxPipeline
 
 
 def _write_valid_csv(path: Path) -> None:
