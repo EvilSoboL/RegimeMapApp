@@ -114,9 +114,14 @@ class ApproxModuleWidget(QWidget):
         self.kernel_combo.setCurrentText("linear")
         layout.addRow("kernel:", self.kernel_combo)
 
+        self.use_median_filter_checkbox = QCheckBox("Использовать медианную фильтрацию")
+        self.use_median_filter_checkbox.setChecked(False)
+        layout.addRow("", self.use_median_filter_checkbox)
+
         self.median_size_spin = QSpinBox()
         self.median_size_spin.setRange(0, 999)
         self.median_size_spin.setValue(20)
+        self.median_size_spin.setEnabled(False)
         layout.addRow("median_size:", self.median_size_spin)
 
         self.clamp_zero_checkbox = QCheckBox("Обнулять отрицательные значения")
@@ -130,14 +135,11 @@ class ApproxModuleWidget(QWidget):
 
         self.validate_button = QPushButton("Проверить данные")
         self.run_button = QPushButton("Запустить обработку")
-        self.open_result_button = QPushButton("Открыть результат")
-        self.open_result_button.setEnabled(False)
         self.open_folder_button = QPushButton("Открыть папку результата")
         self.open_folder_button.setEnabled(False)
 
         layout.addWidget(self.validate_button)
         layout.addWidget(self.run_button)
-        layout.addWidget(self.open_result_button)
         layout.addWidget(self.open_folder_button)
         return group
 
@@ -163,6 +165,8 @@ class ApproxModuleWidget(QWidget):
         self.mode_combo.currentIndexChanged.connect(self.refresh_form_state)
         self.auto_output_name_checkbox.toggled.connect(self._update_output_name_state)
         self.auto_output_name_checkbox.toggled.connect(self.refresh_form_state)
+        self.use_median_filter_checkbox.toggled.connect(self._update_median_filter_state)
+        self.use_median_filter_checkbox.toggled.connect(self.refresh_form_state)
         self.select_input_button.clicked.connect(self._choose_input)
         self.select_output_dir_button.clicked.connect(self._choose_output_dir)
         self.output_name_edit.textChanged.connect(self.refresh_form_state)
@@ -172,7 +176,6 @@ class ApproxModuleWidget(QWidget):
         self.median_size_spin.valueChanged.connect(self.refresh_form_state)
         self.validate_button.clicked.connect(self.validate_data)
         self.run_button.clicked.connect(self.start_processing)
-        self.open_result_button.clicked.connect(self.open_result)
         self.open_folder_button.clicked.connect(self.open_output_folder)
 
     def current_input_mode(self) -> InputMode:
@@ -194,7 +197,7 @@ class ApproxModuleWidget(QWidget):
             resolution_x=self.resolution_x_spin.value(),
             resolution_y=self.resolution_y_spin.value(),
             kernel=self.kernel_combo.currentText(),
-            median_size=self.median_size_spin.value(),
+            median_size=self.median_size_spin.value() if self.use_median_filter_checkbox.isChecked() else 0,
             clamp_zero=self.clamp_zero_checkbox.isChecked(),
             auto_output_name=auto_output_name,
         )
@@ -276,14 +279,6 @@ class ApproxModuleWidget(QWidget):
     def append_log(self, message: str) -> None:
         self.log_edit.appendPlainText(message)
 
-    def open_result(self) -> None:
-        if self._last_summary is None:
-            return
-        target = self._last_summary.last_output_path
-        if target is None:
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
-
     def open_output_folder(self) -> None:
         if self._last_summary is None:
             return
@@ -345,6 +340,7 @@ class ApproxModuleWidget(QWidget):
         self._sync_input_summary()
         self._sync_output_name_preview()
         self._update_output_name_state()
+        self._update_median_filter_state()
 
     def _update_output_name_state(self) -> None:
         mode = self.current_input_mode()
@@ -353,12 +349,17 @@ class ApproxModuleWidget(QWidget):
         if mode.is_single:
             self._sync_output_name_preview()
 
+    def _update_median_filter_state(self) -> None:
+        self.median_size_spin.setEnabled(not self._busy and self.use_median_filter_checkbox.isChecked())
+
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         self.mode_combo.setEnabled(not busy)
         self.select_input_button.setEnabled(not busy)
         self.select_output_dir_button.setEnabled(not busy)
         self.auto_output_name_checkbox.setEnabled(not busy and self.current_input_mode().is_single)
+        self.use_median_filter_checkbox.setEnabled(not busy)
+        self._update_median_filter_state()
         self.output_name_edit.setEnabled(
             not busy and self.current_input_mode().is_single and not self.auto_output_name_checkbox.isChecked()
         )
@@ -382,7 +383,6 @@ class ApproxModuleWidget(QWidget):
     def _on_completed(self, summary: BatchProcessSummary) -> None:
         self._last_summary = summary
         self.open_folder_button.setEnabled(True)
-        self.open_result_button.setEnabled(summary.last_output_path is not None)
         self.append_log(
             f"Итог: обработано {summary.total_files}, успешно {summary.succeeded}, с ошибками {summary.failed}."
         )

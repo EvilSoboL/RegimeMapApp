@@ -9,6 +9,7 @@ pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QPushButton
 
 ApproxModuleWidget = import_module("regime_map_app.approx.ui").ApproxModuleWidget
 InputMode = import_module("regime_map_app.approx.models").InputMode
@@ -83,6 +84,23 @@ def test_input_mode_has_only_file_and_folder_with_single_select_button(qtbot) ->
         InputMode.FOLDER_BATCH,
     ]
     assert widget.select_input_button.text() == "Выбрать"
+    assert "Открыть результат" not in [button.text() for button in widget.findChildren(QPushButton)]
+
+
+def test_median_filter_checkbox_controls_median_size_in_config(qtbot) -> None:
+    widget = ApproxModuleWidget()
+    qtbot.addWidget(widget)
+
+    widget.median_size_spin.setValue(25)
+
+    assert not widget.use_median_filter_checkbox.isChecked()
+    assert not widget.median_size_spin.isEnabled()
+    assert widget.collect_config().median_size == 0
+
+    widget.use_median_filter_checkbox.setChecked(True)
+
+    assert widget.median_size_spin.isEnabled()
+    assert widget.collect_config().median_size == 25
 
 
 def test_validate_button_shows_russian_error_in_log(qtbot, tmp_path: Path) -> None:
@@ -111,11 +129,10 @@ def test_background_processing_updates_progress_and_actions(qtbot, tmp_path: Pat
     _write_valid_csv(input_file)
     widget.set_input_paths([input_file])
     widget.set_output_dir(tmp_path / "out")
-    widget.median_size_spin.setValue(0)
 
     qtbot.mouseClick(widget.run_button, Qt.LeftButton)
     qtbot.waitUntil(lambda: widget._thread is None, timeout=10_000)
 
     assert widget.progress_bar.value() == 100
-    assert widget.open_result_button.isEnabled()
+    assert widget.open_folder_button.isEnabled()
     assert "Готово" in widget.status_label.text()
