@@ -12,18 +12,20 @@ from PySide6.QtCore import Qt
 
 ApproxModuleWidget = import_module("regime_map_app.approx.ui").ApproxModuleWidget
 InputMode = import_module("regime_map_app.approx.models").InputMode
+CSV_SEPARATOR = import_module("regime_map_app.approx.models").CSV_SEPARATOR
+REQUIRED_COLUMNS = import_module("regime_map_app.approx.models").REQUIRED_COLUMNS
 
 
 def _write_valid_csv(path: Path) -> None:
     path.write_text(
         "\n".join(
             [
-                "fuel;;additive;;component",
-                "0;;0;;1",
-                "0;;1;;2",
-                "1;;0;;3",
-                "1;;1;;4",
-                "0.5;;0.5;;2.5",
+                CSV_SEPARATOR.join(REQUIRED_COLUMNS),
+                CSV_SEPARATOR.join(("0", "0", "1")),
+                CSV_SEPARATOR.join(("0", "1", "2")),
+                CSV_SEPARATOR.join(("1", "0", "3")),
+                CSV_SEPARATOR.join(("1", "1", "4")),
+                CSV_SEPARATOR.join(("0.5", "0.5", "2.5")),
             ]
         )
         + "\n",
@@ -63,13 +65,16 @@ def test_validate_button_shows_russian_error_in_log(qtbot, tmp_path: Path) -> No
     qtbot.addWidget(widget)
 
     bad_file = tmp_path / "waste_oil-steam-CO-13-03-2026.csv"
-    bad_file.write_text("fuel;additive;component\n0;0;1\n", encoding="utf-8")
+    bad_file.write_text("fuel,additive,component\n0,0,1\n", encoding="utf-8")
     widget.set_input_paths([bad_file])
     widget.set_output_dir(tmp_path / "out")
 
     qtbot.mouseClick(widget.validate_button, Qt.LeftButton)
 
-    assert "разделитель" in widget.log_edit.toPlainText()
+    assert widget.log_edit.toPlainText() == (
+        "Файл waste_oil-steam-CO-13-03-2026.csv не содержит ожидаемых столбцов. "
+        f"Заголовок должен выглядеть так: {CSV_SEPARATOR.join(REQUIRED_COLUMNS)}"
+    )
 
 
 def test_background_processing_updates_progress_and_actions(qtbot, tmp_path: Path) -> None:

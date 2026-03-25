@@ -50,9 +50,10 @@ class ScipyApproximationBackend:
         missing_columns = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
         if missing_columns:
             if len(frame.columns) == 1:
+                expected_header = CSV_SEPARATOR.join(REQUIRED_COLUMNS)
                 raise CsvValidationError(
                     f"Файл {path.name} не содержит ожидаемых столбцов. "
-                    "Проверьте заголовок и разделитель ';;'."
+                    f"Заголовок должен выглядеть так: {expected_header}"
                 )
             raise CsvValidationError(
                 f"В файле {path.name} отсутствуют обязательные столбцы: {', '.join(missing_columns)}."

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from numpy.typing import NDArray
 
-CSV_SEPARATOR = ";;"
+CSV_SEPARATOR = ";"
 REQUIRED_COLUMNS = ("fuel", "additive", "component")
 DEFAULT_RESOLUTION_X = 100
 DEFAULT_RESOLUTION_Y = 100
