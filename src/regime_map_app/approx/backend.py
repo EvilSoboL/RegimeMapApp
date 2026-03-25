@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 from typing import Protocol
 
@@ -10,6 +11,8 @@ from scipy.ndimage import median_filter
 
 from .exceptions import CsvValidationError, ProcessingError
 from .models import ApproxJobConfig, CSV_SEPARATOR, REQUIRED_COLUMNS, SurfaceGrid
+
+ALTERNATIVE_CSV_DELIMITERS = (",", "\t", "|")
 
 
 class ApproximationBackend(Protocol):
@@ -50,7 +53,14 @@ class ScipyApproximationBackend:
         missing_columns = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
         if missing_columns:
             if len(frame.columns) == 1:
+                detected_separator = _detect_wrong_separator(path)
                 expected_header = CSV_SEPARATOR.join(REQUIRED_COLUMNS)
+                if detected_separator is not None:
+                    raise CsvValidationError(
+                        f"Файл {path.name} использует неверный разделитель {detected_separator!r}. "
+                        f"Ожидается разделитель {CSV_SEPARATOR!r}. "
+                        f"Заголовок должен выглядеть так: {expected_header}"
+                    )
                 raise CsvValidationError(
                     f"Файл {path.name} не содержит ожидаемых столбцов. "
                     f"Заголовок должен выглядеть так: {expected_header}"
@@ -144,3 +154,30 @@ def _format_value(value: object) -> str:
     if isinstance(value, (int, np.integer)):
         return str(int(value))
     return str(value)
+
+
+def _detect_wrong_separator(path: Path) -> str | None:
+    try:
+        with path.open("r", encoding="utf-8") as source:
+            header_line = source.readline().strip()
+    except OSError:
+        return None
+    except UnicodeDecodeError:
+        return None
+
+    if not header_line:
+        return None
+
+    try:
+        dialect = csv.Sniffer().sniff(header_line, delimiters=CSV_SEPARATOR + "".join(ALTERNATIVE_CSV_DELIMITERS))
+    except csv.Error:
+        dialect = None
+
+    if dialect is not None and dialect.delimiter != CSV_SEPARATOR:
+        return dialect.delimiter
+
+    for delimiter in ALTERNATIVE_CSV_DELIMITERS:
+        if delimiter in header_line:
+            return delimiter
+
+    return None

@@ -82,12 +82,41 @@ def test_validate_inputs_reports_wrong_delimiter(tmp_path: Path) -> None:
 
     assert not validation.is_valid
     assert validation.errors == (
-        "Файл waste_oil-steam-CO-13-03-2026.csv не содержит ожидаемых столбцов. "
+        "Файл waste_oil-steam-CO-13-03-2026.csv использует неверный разделитель ','. "
+        "Ожидается разделитель ';'. "
         f"Заголовок должен выглядеть так: {CSV_SEPARATOR.join(REQUIRED_COLUMNS)}",
     )
 
 
-def test_batch_processing_continues_after_bad_file(tmp_path: Path) -> None:
+def test_validate_inputs_reports_missing_required_columns(tmp_path: Path) -> None:
+    input_file = tmp_path / "waste_oil-steam-CO-13-03-2026.csv"
+    input_file.write_text(
+        "\n".join(
+            [
+                "fuel;additive",
+                "0;0",
+                "0;1",
+                "1;0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = ApproxJobConfig(
+        input_mode=InputMode.SINGLE_FILE,
+        input_paths=(input_file,),
+        output_dir=tmp_path / "out",
+    )
+
+    validation = ApproxPipeline().validate_inputs(config)
+
+    assert not validation.is_valid
+    assert validation.errors == (
+        "В файле waste_oil-steam-CO-13-03-2026.csv отсутствуют обязательные столбцы: component.",
+    )
+
+
+def test_batch_processing_continues_after_file_with_missing_columns(tmp_path: Path) -> None:
     folder = tmp_path / "batch"
     folder.mkdir()
     good_file = folder / "waste_oil-steam-CO-13-03-2026.csv"

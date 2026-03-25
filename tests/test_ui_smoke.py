@@ -72,7 +72,8 @@ def test_validate_button_shows_russian_error_in_log(qtbot, tmp_path: Path) -> No
     qtbot.mouseClick(widget.validate_button, Qt.LeftButton)
 
     assert widget.log_edit.toPlainText() == (
-        "Файл waste_oil-steam-CO-13-03-2026.csv не содержит ожидаемых столбцов. "
+        "Файл waste_oil-steam-CO-13-03-2026.csv использует неверный разделитель ','. "
+        "Ожидается разделитель ';'. "
         f"Заголовок должен выглядеть так: {CSV_SEPARATOR.join(REQUIRED_COLUMNS)}"
     )
 
