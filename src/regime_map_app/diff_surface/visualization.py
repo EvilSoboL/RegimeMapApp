@@ -54,8 +54,18 @@ def render_result(figure: Figure, result: DifferentialSurfaceResult) -> None:
         axis,
         result.fuel_axis,
         result.additive_axis,
+        result.minima_line_fit,
+        color="#ff7f0e",
+        linestyle="--",
+        label=_line_label("Линия минимальной концентрации", result.minima_line_fit.slope, result.minima_line_fit.intercept),
+    )
+    _plot_clipped_line(
+        axis,
+        result.fuel_axis,
+        result.additive_axis,
         result.left_line_fit,
         color="#d62728",
+        linestyle="-",
         label=_line_label("Левая линия максимумов", result.left_line_fit.slope, result.left_line_fit.intercept),
     )
     _plot_clipped_line(
@@ -64,6 +74,7 @@ def render_result(figure: Figure, result: DifferentialSurfaceResult) -> None:
         result.additive_axis,
         result.right_line_fit,
         color="#1f77b4",
+        linestyle="-",
         label=_line_label("Правая линия максимумов", result.right_line_fit.slope, result.right_line_fit.intercept),
     )
 
@@ -109,6 +120,7 @@ def _plot_clipped_line(
     line_fit: LineFit,
     *,
     color: str,
+    linestyle: str,
     label: str,
 ) -> None:
     clipped_segment = _clip_line_to_surface_bounds(
@@ -125,6 +137,7 @@ def _plot_clipped_line(
         line_x,
         line_y,
         color=color,
+        linestyle=linestyle,
         linewidth=2.0,
         label=label,
     )

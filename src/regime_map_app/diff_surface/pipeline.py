@@ -150,20 +150,14 @@ class DiffSurfacePipeline:
             raise ProcessingError("Поддерживается только режим поверхности |grad|.")
         return np.sqrt(np.square(dz_dx) + np.square(dz_dy))
 
-    def split_fuel_axis_by_midpoint(
+    def find_minima_points(
         self,
+        component_grid: np.ndarray,
         fuel_axis: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        midpoint = float(fuel_axis[0] + fuel_axis[-1]) / 2.0
-        left_mask = fuel_axis <= midpoint
-        right_mask = fuel_axis > midpoint
-        if not left_mask.any() or not right_mask.any():
-            raise ProcessingError("Не удалось разделить ось fuel на левую и правую части.")
-        if np.count_nonzero(left_mask) < 2 or np.count_nonzero(right_mask) < 2:
-            raise ProcessingError(
-                "Для аппроксимации двух линий максимумов нужно минимум два значения fuel слева и справа от середины диапазона."
-            )
-        return left_mask, right_mask
+        additive_axis: np.ndarray,
+    ) -> np.ndarray:
+        min_indices = np.argmin(component_grid, axis=0)
+        return np.column_stack((fuel_axis, additive_axis[min_indices])).astype(float)
 
     def find_maxima_points(
         self,
@@ -171,20 +165,53 @@ class DiffSurfacePipeline:
         fuel_axis: np.ndarray,
         additive_axis: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
-        left_mask, right_mask = self.split_fuel_axis_by_midpoint(fuel_axis)
-        left_surface = surface[:, left_mask]
-        right_surface = surface[:, right_mask]
+        left_points: list[tuple[float, float]] = []
+        right_points: list[tuple[float, float]] = []
 
-        left_max_indices = np.argmax(left_surface, axis=1)
-        right_max_indices = np.argmax(right_surface, axis=1)
+        for row_index, row in enumerate(surface):
+            left_index, right_index = self.find_two_peak_indices(row)
+            additive_value = float(additive_axis[row_index])
+            left_points.append((float(fuel_axis[left_index]), additive_value))
+            right_points.append((float(fuel_axis[right_index]), additive_value))
 
-        left_points = np.column_stack((fuel_axis[left_mask][left_max_indices], additive_axis)).astype(float)
-        right_points = np.column_stack((fuel_axis[right_mask][right_max_indices], additive_axis)).astype(float)
-        return left_points, right_points
+        return np.asarray(left_points, dtype=float), np.asarray(right_points, dtype=float)
+
+    def find_two_peak_indices(self, row: np.ndarray) -> tuple[int, int]:
+        if row.ndim != 1 or row.size < 2:
+            raise ProcessingError("Для поиска двух максимумов строка поверхности должна содержать минимум две точки.")
+
+        candidate_indices: list[int] = []
+        last_index = row.size - 1
+
+        for index in range(row.size):
+            left_value = row[index - 1] if index > 0 else -np.inf
+            right_value = row[index + 1] if index < last_index else -np.inf
+            is_local_peak = row[index] >= left_value and row[index] >= right_value and (
+                row[index] > left_value or row[index] > right_value
+            )
+            if is_local_peak:
+                candidate_indices.append(index)
+
+        if len(candidate_indices) < 2:
+            candidate_indices = np.argsort(row)[-2:].tolist()
+
+        top_indices = sorted(
+            candidate_indices,
+            key=lambda index: (float(row[index]), -index),
+            reverse=True,
+        )[:2]
+
+        if len(top_indices) < 2:
+            raise ProcessingError("Не удалось найти две точки максимумов на строке дифференциальной поверхности.")
+
+        left_index, right_index = sorted(top_indices)
+        if left_index == right_index:
+            raise ProcessingError("Не удалось выделить две разные точки максимумов на строке дифференциальной поверхности.")
+        return left_index, right_index
 
     def fit_line(self, points: np.ndarray, line_label: str) -> LineFit:
         if len(points) < 2:
-            raise ProcessingError(f"Для аппроксимации {line_label} нужно минимум две точки.")
+            raise ProcessingError(f"Для аппроксимации {line_label} нужны минимум две точки.")
         if np.unique(points[:, 0]).size < 2:
             raise ProcessingError(f"Для аппроксимации {line_label} нужны точки с разными значениями fuel.")
         try:
@@ -225,14 +252,21 @@ class DiffSurfacePipeline:
         self._emit_progress(on_progress, 60)
 
         self._check_cancel(should_cancel)
+        minima_points = self.find_minima_points(component_grid, fuel_axis, additive_axis)
         left_maxima_points, right_maxima_points = self.find_maxima_points(selected_surface, fuel_axis, additive_axis)
+        self._emit_log(on_log, f"Найдена линия минимумов концентрации по {len(minima_points)} точкам.")
         self._emit_log(on_log, f"Найдено точек максимумов слева: {len(left_maxima_points)}.")
         self._emit_log(on_log, f"Найдено точек максимумов справа: {len(right_maxima_points)}.")
         self._emit_progress(on_progress, 80)
 
         self._check_cancel(should_cancel)
+        minima_line_fit = self.fit_line(minima_points, "линии минимумов концентрации")
         left_line_fit = self.fit_line(left_maxima_points, "левой линии максимумов")
         right_line_fit = self.fit_line(right_maxima_points, "правой линии максимумов")
+        self._emit_log(
+            on_log,
+            f"Линия минимумов концентрации: additive = {minima_line_fit.slope:.6g} * fuel + {minima_line_fit.intercept:.6g}",
+        )
         self._emit_log(
             on_log,
             f"Левая линия максимумов: additive = {left_line_fit.slope:.6g} * fuel + {left_line_fit.intercept:.6g}",
@@ -252,6 +286,8 @@ class DiffSurfacePipeline:
             dz_dx=dz_dx,
             dz_dy=dz_dy,
             selected_surface=np.asarray(selected_surface, dtype=float),
+            minima_points=minima_points,
+            minima_line_fit=minima_line_fit,
             left_maxima_points=left_maxima_points,
             right_maxima_points=right_maxima_points,
             left_line_fit=left_line_fit,
@@ -262,6 +298,11 @@ class DiffSurfacePipeline:
         payload = {
             "input_file": str(result.input_path),
             "surface_mode": result.surface_mode.value,
+            "min_concentration_line": {
+                "points_count": int(len(result.minima_points)),
+                "a": result.minima_line_fit.slope,
+                "b": result.minima_line_fit.intercept,
+            },
             "left_max_gradient_line": {
                 "points_count": int(len(result.left_maxima_points)),
                 "a": result.left_line_fit.slope,

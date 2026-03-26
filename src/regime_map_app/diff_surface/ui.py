@@ -270,7 +270,10 @@ class DiffSurfaceModuleWidget(QWidget):
         self._last_result = result
         render_result(self.figure, result)
         self.append_log(
-            f"Построение завершено. Левая линия максимумов: a={result.left_line_fit.slope:.6g}, b={result.left_line_fit.intercept:.6g}."
+            f"Построение завершено. Линия минимальной концентрации: a={result.minima_line_fit.slope:.6g}, b={result.minima_line_fit.intercept:.6g}."
+        )
+        self.append_log(
+            f"Левая линия максимумов: a={result.left_line_fit.slope:.6g}, b={result.left_line_fit.intercept:.6g}."
         )
         self.append_log(
             f"Правая линия максимумов: a={result.right_line_fit.slope:.6g}, b={result.right_line_fit.intercept:.6g}."
