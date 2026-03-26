@@ -147,10 +147,8 @@ class DiffSurfacePipeline:
         dz_dy: np.ndarray,
         surface_mode: SurfaceMode,
     ) -> np.ndarray:
-        if surface_mode is SurfaceMode.DZ_DX:
-            return np.asarray(dz_dx, dtype=float)
-        if surface_mode is SurfaceMode.DZ_DY:
-            return np.asarray(dz_dy, dtype=float)
+        if surface_mode is not SurfaceMode.GRADIENT_MAGNITUDE:
+            raise ProcessingError("Поддерживается только режим поверхности |grad|.")
         return np.sqrt(np.square(dz_dx) + np.square(dz_dy))
 
     def find_maxima_points(

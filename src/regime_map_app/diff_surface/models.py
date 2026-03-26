@@ -11,16 +11,10 @@ REQUIRED_COLUMNS = ("fuel", "additive", "component")
 
 
 class SurfaceMode(str, Enum):
-    DZ_DX = "dz_dx"
-    DZ_DY = "dz_dy"
     GRADIENT_MAGNITUDE = "grad"
 
     @property
     def label(self) -> str:
-        if self is SurfaceMode.DZ_DX:
-            return "dz/dx"
-        if self is SurfaceMode.DZ_DY:
-            return "dz/dy"
         return "|grad|"
 
 
@@ -35,7 +29,7 @@ class SplitMethod(str, Enum):
 @dataclass(frozen=True)
 class DiffSurfaceJobConfig:
     input_path: Path | None
-    surface_mode: SurfaceMode = SurfaceMode.DZ_DX
+    surface_mode: SurfaceMode = SurfaceMode.GRADIENT_MAGNITUDE
     split_method: SplitMethod = SplitMethod.FUEL_MIDPOINT
 
 

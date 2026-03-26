@@ -53,6 +53,7 @@ def test_diff_surface_run_button_is_disabled_until_file_is_selected(qtbot, tmp_p
     widget = DiffSurfaceModuleWidget()
     qtbot.addWidget(widget)
 
+    assert widget.surface_mode_label.text() == "|grad|"
     assert not widget.run_button.isEnabled()
     assert not widget.validate_button.isEnabled()
     assert not widget.save_button.isEnabled()

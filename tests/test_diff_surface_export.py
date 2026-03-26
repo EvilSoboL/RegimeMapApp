@@ -57,11 +57,11 @@ def test_export_creates_png_and_json(tmp_path: Path) -> None:
     result = pipeline.process_job(
         DiffSurfaceJobConfig(
             input_path=input_file,
-            surface_mode=SurfaceMode.DZ_DX,
+            surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
             split_method=SplitMethod.FUEL_MIDPOINT,
         )
     )
-    png_path, json_path = resolve_export_paths(output_dir, input_file, SurfaceMode.DZ_DX)
+    png_path, json_path = resolve_export_paths(output_dir, input_file, SurfaceMode.GRADIENT_MAGNITUDE)
 
     save_plot(result, png_path)
     pipeline.export_line_parameters(result, json_path)
@@ -72,7 +72,7 @@ def test_export_creates_png_and_json(tmp_path: Path) -> None:
 
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["input_file"] == str(input_file)
-    assert payload["surface_mode"] == "dz_dx"
+    assert payload["surface_mode"] == "grad"
     assert payload["split_method"] == "fuel_midpoint"
     assert payload["line_1"]["points_count"] == 2
     assert payload["line_2"]["points_count"] == 2

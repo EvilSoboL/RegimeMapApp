@@ -5,7 +5,6 @@ from pathlib import Path
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -85,11 +84,8 @@ class DiffSurfaceModuleWidget(QWidget):
         group = QGroupBox("Параметры")
         layout = QFormLayout(group)
 
-        self.surface_mode_combo = QComboBox()
-        self.surface_mode_combo.addItem("dz/dx", SurfaceMode.DZ_DX)
-        self.surface_mode_combo.addItem("dz/dy", SurfaceMode.DZ_DY)
-        self.surface_mode_combo.addItem("|grad|", SurfaceMode.GRADIENT_MAGNITUDE)
-        layout.addRow("Тип поверхности:", self.surface_mode_combo)
+        self.surface_mode_label = QLabel(SurfaceMode.GRADIENT_MAGNITUDE.label)
+        layout.addRow("Тип поверхности:", self.surface_mode_label)
 
         self.split_method_label = QLabel(SplitMethod.FUEL_MIDPOINT.label)
         layout.addRow("Метод линий:", self.split_method_label)
@@ -126,16 +122,12 @@ class DiffSurfaceModuleWidget(QWidget):
 
     def _wire_signals(self) -> None:
         self.select_input_button.clicked.connect(self._choose_input)
-        self.surface_mode_combo.currentIndexChanged.connect(self._on_parameters_changed)
         self.validate_button.clicked.connect(self.validate_data)
         self.run_button.clicked.connect(self.start_processing)
         self.save_button.clicked.connect(self.save_results)
 
     def current_surface_mode(self) -> SurfaceMode:
-        mode = self.surface_mode_combo.currentData()
-        if isinstance(mode, SurfaceMode):
-            return mode
-        return SurfaceMode(mode)
+        return SurfaceMode.GRADIENT_MAGNITUDE
 
     def collect_config(self) -> DiffSurfaceJobConfig:
         return DiffSurfaceJobConfig(
@@ -152,7 +144,6 @@ class DiffSurfaceModuleWidget(QWidget):
         self.run_button.setEnabled(run_ready)
         self.save_button.setEnabled(self._last_result is not None and not self._busy)
         self.select_input_button.setEnabled(not self._busy)
-        self.surface_mode_combo.setEnabled(not self._busy)
 
     def set_input_path(self, path: Path, *, user_selected: bool) -> None:
         self._selected_input_path = path
@@ -263,10 +254,6 @@ class DiffSurfaceModuleWidget(QWidget):
         file_name, _ = QFileDialog.getOpenFileName(self, "Выбрать CSV", filter="CSV Files (*.csv)")
         if file_name:
             self.set_input_path(Path(file_name), user_selected=True)
-
-    def _on_parameters_changed(self) -> None:
-        self._invalidate_result()
-        self.refresh_form_state()
 
     def _invalidate_result(self) -> None:
         self._last_result = None

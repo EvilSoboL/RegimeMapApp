@@ -106,7 +106,7 @@ def test_process_job_builds_surface_and_finds_two_lines(tmp_path: Path) -> None:
     result = pipeline.process_job(
         DiffSurfaceJobConfig(
             input_path=input_file,
-            surface_mode=SurfaceMode.DZ_DX,
+            surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
             split_method=SplitMethod.FUEL_MIDPOINT,
         )
     )
