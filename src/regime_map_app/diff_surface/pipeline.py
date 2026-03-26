@@ -159,7 +159,7 @@ class DiffSurfacePipeline:
         min_indices = np.argmin(component_grid, axis=0)
         return np.column_stack((fuel_axis, additive_axis[min_indices])).astype(float)
 
-    def find_maxima_points(
+    def find_peak_pair_points(
         self,
         surface: np.ndarray,
         fuel_axis: np.ndarray,
@@ -175,6 +175,35 @@ class DiffSurfacePipeline:
             right_points.append((float(fuel_axis[right_index]), additive_value))
 
         return np.asarray(left_points, dtype=float), np.asarray(right_points, dtype=float)
+
+    def split_maxima_points_by_minimum_line(
+        self,
+        first_peak_points: np.ndarray,
+        second_peak_points: np.ndarray,
+        minimum_line_fit: LineFit,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        all_points = np.vstack((first_peak_points, second_peak_points)).astype(float)
+        minimum_line_values = minimum_line_fit.slope * all_points[:, 0] + minimum_line_fit.intercept
+        tolerance = 1e-9
+        left_points = all_points[all_points[:, 1] >= minimum_line_values - tolerance]
+        right_points = all_points[all_points[:, 1] < minimum_line_values - tolerance]
+
+        if len(left_points) == 0 or len(right_points) == 0:
+            raise ProcessingError(
+                "Не удалось разделить точки максимумов относительно линии минимальной концентрации."
+            )
+
+        return self._sort_points(left_points), self._sort_points(right_points)
+
+    def find_maxima_points(
+        self,
+        surface: np.ndarray,
+        fuel_axis: np.ndarray,
+        additive_axis: np.ndarray,
+        minimum_line_fit: LineFit,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        first_peak_points, second_peak_points = self.find_peak_pair_points(surface, fuel_axis, additive_axis)
+        return self.split_maxima_points_by_minimum_line(first_peak_points, second_peak_points, minimum_line_fit)
 
     def find_two_peak_indices(self, row: np.ndarray) -> tuple[int, int]:
         if row.ndim != 1 or row.size < 2:
@@ -222,6 +251,10 @@ class DiffSurfacePipeline:
             raise ProcessingError(f"Коэффициенты {line_label} получились некорректными.")
         return LineFit(slope=float(slope), intercept=float(intercept))
 
+    def _sort_points(self, points: np.ndarray) -> np.ndarray:
+        order = np.lexsort((points[:, 0], points[:, 1]))
+        return np.asarray(points[order], dtype=float)
+
     def process_job(
         self,
         config: DiffSurfaceJobConfig,
@@ -253,14 +286,19 @@ class DiffSurfacePipeline:
 
         self._check_cancel(should_cancel)
         minima_points = self.find_minima_points(component_grid, fuel_axis, additive_axis)
-        left_maxima_points, right_maxima_points = self.find_maxima_points(selected_surface, fuel_axis, additive_axis)
+        minima_line_fit = self.fit_line(minima_points, "линии минимумов концентрации")
+        left_maxima_points, right_maxima_points = self.find_maxima_points(
+            selected_surface,
+            fuel_axis,
+            additive_axis,
+            minima_line_fit,
+        )
         self._emit_log(on_log, f"Найдена линия минимумов концентрации по {len(minima_points)} точкам.")
-        self._emit_log(on_log, f"Найдено точек максимумов слева: {len(left_maxima_points)}.")
-        self._emit_log(on_log, f"Найдено точек максимумов справа: {len(right_maxima_points)}.")
+        self._emit_log(on_log, f"Найдено точек максимумов слева выше линии минимума: {len(left_maxima_points)}.")
+        self._emit_log(on_log, f"Найдено точек максимумов справа ниже линии минимума: {len(right_maxima_points)}.")
         self._emit_progress(on_progress, 80)
 
         self._check_cancel(should_cancel)
-        minima_line_fit = self.fit_line(minima_points, "линии минимумов концентрации")
         left_line_fit = self.fit_line(left_maxima_points, "левой линии максимумов")
         right_line_fit = self.fit_line(right_maxima_points, "правой линии максимумов")
         self._emit_log(
