@@ -30,30 +30,17 @@ def render_result(figure: Figure, result: DifferentialSurfaceResult) -> None:
     contour = axis.contourf(fuel_grid, additive_grid, result.selected_surface, levels=levels, cmap="viridis")
     figure.colorbar(contour, ax=axis, label=result.surface_mode.label)
 
-    axis.scatter(
-        result.maxima_points[:, 0],
-        result.maxima_points[:, 1],
-        s=28,
-        c="white",
-        edgecolors="black",
-        linewidths=0.6,
-        label="Точки максимумов",
-    )
-
     line_x = np.linspace(float(result.fuel_axis.min()), float(result.fuel_axis.max()), 200)
     axis.plot(
         line_x,
-        result.line_1_fit.slope * line_x + result.line_1_fit.intercept,
+        result.minima_line_fit.slope * line_x + result.minima_line_fit.intercept,
         color="#d62728",
         linewidth=2.0,
-        label=_line_label("Линия 1", result.line_1_fit.slope, result.line_1_fit.intercept),
-    )
-    axis.plot(
-        line_x,
-        result.line_2_fit.slope * line_x + result.line_2_fit.intercept,
-        color="#1f77b4",
-        linewidth=2.0,
-        label=_line_label("Линия 2", result.line_2_fit.slope, result.line_2_fit.intercept),
+        label=_line_label(
+            "Линия минимумов концентрации",
+            result.minima_line_fit.slope,
+            result.minima_line_fit.intercept,
+        ),
     )
 
     axis.set_xlabel("fuel")

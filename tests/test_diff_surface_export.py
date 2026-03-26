@@ -14,7 +14,6 @@ validation_module = import_module("regime_map_app.diff_surface.validation")
 visualization_module = import_module("regime_map_app.diff_surface.visualization")
 
 DiffSurfaceJobConfig = models.DiffSurfaceJobConfig
-SplitMethod = models.SplitMethod
 SurfaceMode = models.SurfaceMode
 DiffSurfacePipeline = pipeline_module.DiffSurfacePipeline
 resolve_export_paths = validation_module.resolve_export_paths
@@ -30,18 +29,18 @@ def _write_success_surface_csv(path: Path) -> None:
                 "1;0;5",
                 "2;0;6",
                 "3;0;7",
-                "0;1;0",
-                "1;1;4",
+                "0;1;4",
+                "1;1;0",
                 "2;1;10",
                 "3;1;11",
-                "0;2;0",
-                "1;2;-4",
-                "2;2;4",
+                "0;2;8",
+                "1;2;7",
+                "2;2;0",
                 "3;2;5",
-                "0;3;0",
-                "1;3;1",
-                "2;3;2",
-                "3;3;10",
+                "0;3;9",
+                "1;3;8",
+                "2;3;7",
+                "3;3;0",
             ]
         )
         + "\n",
@@ -58,7 +57,6 @@ def test_export_creates_png_and_json(tmp_path: Path) -> None:
         DiffSurfaceJobConfig(
             input_path=input_file,
             surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
-            split_method=SplitMethod.FUEL_MIDPOINT,
         )
     )
     png_path, json_path = resolve_export_paths(output_dir, input_file, SurfaceMode.GRADIENT_MAGNITUDE)
@@ -73,6 +71,6 @@ def test_export_creates_png_and_json(tmp_path: Path) -> None:
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["input_file"] == str(input_file)
     assert payload["surface_mode"] == "grad"
-    assert payload["split_method"] == "fuel_midpoint"
-    assert payload["line_1"]["points_count"] == 2
-    assert payload["line_2"]["points_count"] == 2
+    assert payload["min_concentration_line"]["points_count"] == 4
+    assert payload["min_concentration_line"]["a"] == pytest.approx(1.0)
+    assert payload["min_concentration_line"]["b"] == pytest.approx(0.0)

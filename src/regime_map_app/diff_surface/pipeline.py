@@ -15,7 +15,6 @@ from .models import (
     DiffSurfaceJobConfig,
     DifferentialSurfaceResult,
     LineFit,
-    SplitMethod,
     SurfaceMode,
     ValidationResult,
 )
@@ -151,32 +150,14 @@ class DiffSurfacePipeline:
             raise ProcessingError("Поддерживается только режим поверхности |grad|.")
         return np.sqrt(np.square(dz_dx) + np.square(dz_dy))
 
-    def find_maxima_points(
+    def find_minima_points(
         self,
-        surface: np.ndarray,
+        component_grid: np.ndarray,
         fuel_axis: np.ndarray,
         additive_axis: np.ndarray,
     ) -> np.ndarray:
-        max_indices = np.argmax(surface, axis=1)
-        return np.column_stack((fuel_axis[max_indices], additive_axis)).astype(float)
-
-    def split_maxima_points(
-        self,
-        maxima_points: np.ndarray,
-        fuel_axis: np.ndarray,
-        split_method: SplitMethod,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        if split_method is not SplitMethod.FUEL_MIDPOINT:
-            raise ProcessingError(f"Метод разделения {split_method.value!r} не поддерживается.")
-
-        midpoint = float(fuel_axis[0] + fuel_axis[-1]) / 2.0
-        line_1_points = maxima_points[maxima_points[:, 0] <= midpoint]
-        line_2_points = maxima_points[maxima_points[:, 0] > midpoint]
-        if len(line_1_points) == 0 or len(line_2_points) == 0:
-            raise ProcessingError(
-                "Не удалось разделить точки максимумов на две линии методом по середине диапазона fuel."
-            )
-        return line_1_points, line_2_points
+        min_indices = np.argmin(component_grid, axis=0)
+        return np.column_stack((fuel_axis, additive_axis[min_indices])).astype(float)
 
     def fit_line(self, points: np.ndarray, line_label: str) -> LineFit:
         if len(points) < 2:
@@ -226,55 +207,40 @@ class DiffSurfacePipeline:
         self._emit_progress(on_progress, 60)
 
         self._check_cancel(should_cancel)
-        maxima_points = self.find_maxima_points(selected_surface, fuel_axis, additive_axis)
-        line_1_points, line_2_points = self.split_maxima_points(maxima_points, fuel_axis, config.split_method)
-        self._emit_log(on_log, f"Найдено точек максимумов: {len(maxima_points)}.")
+        minima_points = self.find_minima_points(component_grid, fuel_axis, additive_axis)
+        self._emit_log(on_log, f"Найдено точек минимумов концентрации: {len(minima_points)}.")
         self._emit_progress(on_progress, 80)
 
         self._check_cancel(should_cancel)
-        line_1_fit = self.fit_line(line_1_points, "первой")
-        line_2_fit = self.fit_line(line_2_points, "второй")
+        minima_line_fit = self.fit_line(minima_points, "минимумов концентрации")
         self._emit_log(
             on_log,
-            f"Линия 1: additive = {line_1_fit.slope:.6g} * fuel + {line_1_fit.intercept:.6g}",
-        )
-        self._emit_log(
-            on_log,
-            f"Линия 2: additive = {line_2_fit.slope:.6g} * fuel + {line_2_fit.intercept:.6g}",
+            "Линия минимумов концентрации: "
+            f"additive = {minima_line_fit.slope:.6g} * fuel + {minima_line_fit.intercept:.6g}",
         )
         self._emit_progress(on_progress, 100)
 
         return DifferentialSurfaceResult(
             input_path=config.input_path,
             surface_mode=config.surface_mode,
-            split_method=config.split_method,
             fuel_axis=fuel_axis,
             additive_axis=additive_axis,
             component_grid=component_grid,
             dz_dx=dz_dx,
             dz_dy=dz_dy,
             selected_surface=np.asarray(selected_surface, dtype=float),
-            maxima_points=maxima_points,
-            line_1_points=line_1_points,
-            line_2_points=line_2_points,
-            line_1_fit=line_1_fit,
-            line_2_fit=line_2_fit,
+            minima_points=minima_points,
+            minima_line_fit=minima_line_fit,
         )
 
     def export_line_parameters(self, result: DifferentialSurfaceResult, output_path: Path) -> None:
         payload = {
             "input_file": str(result.input_path),
             "surface_mode": result.surface_mode.value,
-            "split_method": result.split_method.value,
-            "line_1": {
-                "points_count": int(len(result.line_1_points)),
-                "a": result.line_1_fit.slope,
-                "b": result.line_1_fit.intercept,
-            },
-            "line_2": {
-                "points_count": int(len(result.line_2_points)),
-                "a": result.line_2_fit.slope,
-                "b": result.line_2_fit.intercept,
+            "min_concentration_line": {
+                "points_count": int(len(result.minima_points)),
+                "a": result.minima_line_fit.slope,
+                "b": result.minima_line_fit.intercept,
             },
         }
         output_path.parent.mkdir(parents=True, exist_ok=True)

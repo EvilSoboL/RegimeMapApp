@@ -12,7 +12,6 @@ pipeline_module = import_module("regime_map_app.diff_surface.pipeline")
 CSV_SEPARATOR = models.CSV_SEPARATOR
 REQUIRED_COLUMNS = models.REQUIRED_COLUMNS
 DiffSurfaceJobConfig = models.DiffSurfaceJobConfig
-SplitMethod = models.SplitMethod
 SurfaceMode = models.SurfaceMode
 DiffSurfacePipeline = pipeline_module.DiffSurfacePipeline
 
@@ -29,18 +28,18 @@ def _write_success_surface_csv(path: Path) -> None:
         (1, 0, 5),
         (2, 0, 6),
         (3, 0, 7),
-        (0, 1, 0),
-        (1, 1, 4),
+        (0, 1, 4),
+        (1, 1, 0),
         (2, 1, 10),
         (3, 1, 11),
-        (0, 2, 0),
-        (1, 2, -4),
-        (2, 2, 4),
+        (0, 2, 8),
+        (1, 2, 7),
+        (2, 2, 0),
         (3, 2, 5),
-        (0, 3, 0),
-        (1, 3, 1),
-        (2, 3, 2),
-        (3, 3, 10),
+        (0, 3, 9),
+        (1, 3, 8),
+        (2, 3, 7),
+        (3, 3, 0),
     ]
     _write_csv(path, rows)
 
@@ -77,28 +76,53 @@ def test_compute_derivatives_returns_expected_values_for_plane() -> None:
     assert np.allclose(gradient_surface, np.sqrt(13.0))
 
 
-def test_split_points_and_fit_lines_for_midpoint_method() -> None:
+def test_find_minima_points_and_fit_line() -> None:
     pipeline = DiffSurfacePipeline()
-    maxima_points = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]])
-    fuel_axis = np.array([0.0, 1.0, 2.0, 3.0])
-
-    line_1_points, line_2_points = pipeline.split_maxima_points(
-        maxima_points,
-        fuel_axis,
-        SplitMethod.FUEL_MIDPOINT,
+    component_grid = np.array(
+        [
+            [0.0, 5.0, 6.0, 7.0],
+            [4.0, 0.0, 10.0, 11.0],
+            [8.0, 7.0, 0.0, 5.0],
+            [9.0, 8.0, 7.0, 0.0],
+        ]
     )
-    line_1_fit = pipeline.fit_line(line_1_points, "первой")
-    line_2_fit = pipeline.fit_line(line_2_points, "второй")
+    fuel_axis = np.array([0.0, 1.0, 2.0, 3.0])
+    additive_axis = np.array([0.0, 1.0, 2.0, 3.0])
 
-    assert np.array_equal(line_1_points, np.array([[0.0, 0.0], [1.0, 1.0]]))
-    assert np.array_equal(line_2_points, np.array([[2.0, 2.0], [3.0, 3.0]]))
-    assert np.isclose(line_1_fit.slope, 1.0)
-    assert np.isclose(line_1_fit.intercept, 0.0)
-    assert np.isclose(line_2_fit.slope, 1.0)
-    assert np.isclose(line_2_fit.intercept, 0.0)
+    minima_points = pipeline.find_minima_points(
+        component_grid,
+        fuel_axis,
+        additive_axis,
+    )
+    minima_line_fit = pipeline.fit_line(minima_points, "минимумов концентрации")
+
+    assert np.array_equal(minima_points, np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]))
+    assert np.isclose(minima_line_fit.slope, 1.0)
+    assert np.isclose(minima_line_fit.intercept, 0.0)
 
 
-def test_process_job_builds_surface_and_finds_two_lines(tmp_path: Path) -> None:
+def test_find_minima_points_tracks_minimum_for_each_fuel_value() -> None:
+    pipeline = DiffSurfacePipeline()
+    component_grid = np.array(
+        [
+            [5.0, 0.0, 5.0],
+            [0.0, 5.0, 0.5],
+            [6.0, 1.0, 2.0],
+        ]
+    )
+    fuel_axis = np.array([0.0, 1.0, 2.0])
+    additive_axis = np.array([0.0, 1.0, 2.0])
+
+    minima_points = pipeline.find_minima_points(
+        component_grid,
+        fuel_axis,
+        additive_axis,
+    )
+
+    assert np.array_equal(minima_points, np.array([[0.0, 1.0], [1.0, 0.0], [2.0, 1.0]]))
+
+
+def test_process_job_builds_surface_and_finds_minimum_line(tmp_path: Path) -> None:
     input_file = tmp_path / "surface.csv"
     _write_success_surface_csv(input_file)
     pipeline = DiffSurfacePipeline()
@@ -107,15 +131,11 @@ def test_process_job_builds_surface_and_finds_two_lines(tmp_path: Path) -> None:
         DiffSurfaceJobConfig(
             input_path=input_file,
             surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
-            split_method=SplitMethod.FUEL_MIDPOINT,
         )
     )
 
     assert result.surface_mode is SurfaceMode.GRADIENT_MAGNITUDE
     assert result.selected_surface.shape == (4, 4)
-    assert len(result.line_1_points) >= 1
-    assert len(result.line_2_points) >= 1
-    assert np.isfinite(result.line_1_fit.slope)
-    assert np.isfinite(result.line_1_fit.intercept)
-    assert np.isfinite(result.line_2_fit.slope)
-    assert np.isfinite(result.line_2_fit.intercept)
+    assert np.array_equal(result.minima_points, np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]))
+    assert np.isclose(result.minima_line_fit.slope, 1.0)
+    assert np.isclose(result.minima_line_fit.intercept, 0.0)

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from .exceptions import DiffSurfaceError
-from .models import DiffSurfaceJobConfig, DifferentialSurfaceResult, SplitMethod, SurfaceMode
+from .models import DiffSurfaceJobConfig, DifferentialSurfaceResult, SurfaceMode
 from .pipeline import DiffSurfacePipeline
 from .validation import resolve_export_paths, validate_job_config
 from .visualization import create_figure, render_placeholder, render_result, save_plot
@@ -86,9 +86,6 @@ class DiffSurfaceModuleWidget(QWidget):
 
         self.surface_mode_label = QLabel(SurfaceMode.GRADIENT_MAGNITUDE.label)
         layout.addRow("Тип поверхности:", self.surface_mode_label)
-
-        self.split_method_label = QLabel(SplitMethod.FUEL_MIDPOINT.label)
-        layout.addRow("Метод линий:", self.split_method_label)
         return group
 
     def _build_actions_group(self) -> QGroupBox:
@@ -133,7 +130,6 @@ class DiffSurfaceModuleWidget(QWidget):
         return DiffSurfaceJobConfig(
             input_path=self._selected_input_path,
             surface_mode=self.current_surface_mode(),
-            split_method=SplitMethod.FUEL_MIDPOINT,
         )
 
     def refresh_form_state(self) -> None:
@@ -196,7 +192,6 @@ class DiffSurfaceModuleWidget(QWidget):
         self.log_edit.clear()
         self.append_log(f"Файл: {input_path.name}")
         self.append_log(f"Режим поверхности: {config.surface_mode.label}")
-        self.append_log(f"Метод разделения линий: {config.split_method.label}")
         self.progress_bar.setValue(0)
         self.status_label.setText("Статус: запуск фонового построения")
         self._set_busy(True)
@@ -277,10 +272,8 @@ class DiffSurfaceModuleWidget(QWidget):
         self._last_result = result
         render_result(self.figure, result)
         self.append_log(
-            f"Построение завершено. Линия 1: a={result.line_1_fit.slope:.6g}, b={result.line_1_fit.intercept:.6g}."
-        )
-        self.append_log(
-            f"Линия 2: a={result.line_2_fit.slope:.6g}, b={result.line_2_fit.intercept:.6g}."
+            "Построение завершено. Линия минимумов концентрации: "
+            f"a={result.minima_line_fit.slope:.6g}, b={result.minima_line_fit.intercept:.6g}."
         )
         self.save_button.setEnabled(True)
 
