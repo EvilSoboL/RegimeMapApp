@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -30,23 +31,33 @@ def render_result(figure: Figure, result: DifferentialSurfaceResult) -> None:
     contour = axis.contourf(fuel_grid, additive_grid, result.selected_surface, levels=levels, cmap="viridis")
     figure.colorbar(contour, ax=axis, label=result.surface_mode.label)
 
-    line_x = np.linspace(float(result.fuel_axis.min()), float(result.fuel_axis.max()), 200)
-    axis.plot(
-        line_x,
-        result.minima_line_fit.slope * line_x + result.minima_line_fit.intercept,
-        color="#d62728",
-        linewidth=2.0,
-        label=_line_label(
-            "Линия минимумов концентрации",
-            result.minima_line_fit.slope,
-            result.minima_line_fit.intercept,
-        ),
+    clipped_segment = _clip_line_to_surface_bounds(
+        result.fuel_axis,
+        result.additive_axis,
+        result.minima_line_fit.slope,
+        result.minima_line_fit.intercept,
     )
+    if clipped_segment is not None:
+        line_x, line_y = clipped_segment
+        axis.plot(
+            line_x,
+            line_y,
+            color="#d62728",
+            linewidth=2.0,
+            label=_line_label(
+                "Линия минимумов концентрации",
+                result.minima_line_fit.slope,
+                result.minima_line_fit.intercept,
+            ),
+        )
 
     axis.set_xlabel("fuel")
     axis.set_ylabel("additive")
+    axis.set_xlim(float(result.fuel_axis.min()), float(result.fuel_axis.max()))
+    axis.set_ylim(float(result.additive_axis.min()), float(result.additive_axis.max()))
     axis.set_title(f"Дифференциальная поверхность: {result.surface_mode.label}")
-    axis.legend(loc="best")
+    if axis.lines:
+        axis.legend(loc="best")
     figure.tight_layout()
     _draw_if_possible(figure)
 
@@ -72,6 +83,58 @@ def _build_levels(surface: np.ndarray) -> int | np.ndarray:
 
 def _line_label(prefix: str, slope: float, intercept: float) -> str:
     return f"{prefix}: y = {slope:.3g}x + {intercept:.3g}"
+
+
+def _clip_line_to_surface_bounds(
+    fuel_axis: np.ndarray,
+    additive_axis: np.ndarray,
+    slope: float,
+    intercept: float,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    x_min = float(np.min(fuel_axis))
+    x_max = float(np.max(fuel_axis))
+    y_min = float(np.min(additive_axis))
+    y_max = float(np.max(additive_axis))
+    tolerance = 1e-9
+
+    if np.isclose(slope, 0.0):
+        y_value = float(intercept)
+        if y_value < y_min - tolerance or y_value > y_max + tolerance:
+            return None
+        clipped_y = float(np.clip(y_value, y_min, y_max))
+        return np.array([x_min, x_max], dtype=float), np.array([clipped_y, clipped_y], dtype=float)
+
+    candidates: list[tuple[float, float]] = []
+
+    for x_value in (x_min, x_max):
+        y_value = slope * x_value + intercept
+        if y_min - tolerance <= y_value <= y_max + tolerance:
+            candidates.append((x_value, float(np.clip(y_value, y_min, y_max))))
+
+    for y_value in (y_min, y_max):
+        x_value = (y_value - intercept) / slope
+        if x_min - tolerance <= x_value <= x_max + tolerance:
+            candidates.append((float(np.clip(x_value, x_min, x_max)), y_value))
+
+    unique_points: list[tuple[float, float]] = []
+    for point in candidates:
+        if not any(np.allclose(point, saved_point, atol=tolerance, rtol=0.0) for saved_point in unique_points):
+            unique_points.append(point)
+
+    if len(unique_points) < 2:
+        return None
+
+    start_point, end_point = max(
+        combinations(unique_points, 2),
+        key=lambda pair: (pair[0][0] - pair[1][0]) ** 2 + (pair[0][1] - pair[1][1]) ** 2,
+    )
+    if start_point[0] > end_point[0] or (np.isclose(start_point[0], end_point[0]) and start_point[1] > end_point[1]):
+        start_point, end_point = end_point, start_point
+
+    return (
+        np.array([start_point[0], end_point[0]], dtype=float),
+        np.array([start_point[1], end_point[1]], dtype=float),
+    )
 
 
 def _draw_if_possible(figure: Figure) -> None:
