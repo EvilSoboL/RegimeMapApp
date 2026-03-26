@@ -166,9 +166,7 @@ class DiffSurfaceModuleWidget(QWidget):
         validation = self.pipeline.validate_inputs(config)
         self.log_edit.clear()
         if validation.is_valid:
-            self.append_log(
-                f"Проверка завершена успешно. Подготовлено точек: {validation.checked_points}."
-            )
+            self.append_log(f"Проверка завершена успешно. Подготовлено точек: {validation.checked_points}.")
             self.status_label.setText("Статус: данные готовы к построению")
             return
 
@@ -180,7 +178,7 @@ class DiffSurfaceModuleWidget(QWidget):
         config = self.collect_config()
         validation = validate_job_config(config)
         if not validation.is_valid:
-            self.status_label.setText("Статус: запуск отменён")
+            self.status_label.setText("Статус: запуск отменен")
             for error in validation.errors:
                 self.append_log(error)
             return
@@ -238,7 +236,7 @@ class DiffSurfaceModuleWidget(QWidget):
             self.status_label.setText("Статус: ошибка сохранения")
             return
 
-        self.append_log(f"Сохранён график: {png_path.name}")
+        self.append_log(f"Сохранен график: {png_path.name}")
         self.append_log(f"Сохранены параметры линий: {json_path.name}")
         self.status_label.setText("Статус: результаты сохранены")
 
@@ -272,8 +270,10 @@ class DiffSurfaceModuleWidget(QWidget):
         self._last_result = result
         render_result(self.figure, result)
         self.append_log(
-            "Построение завершено. Линия минимумов концентрации: "
-            f"a={result.minima_line_fit.slope:.6g}, b={result.minima_line_fit.intercept:.6g}."
+            f"Построение завершено. Левая линия максимумов: a={result.left_line_fit.slope:.6g}, b={result.left_line_fit.intercept:.6g}."
+        )
+        self.append_log(
+            f"Правая линия максимумов: a={result.right_line_fit.slope:.6g}, b={result.right_line_fit.intercept:.6g}."
         )
         self.save_button.setEnabled(True)
 

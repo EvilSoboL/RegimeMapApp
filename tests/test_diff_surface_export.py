@@ -14,7 +14,6 @@ pipeline_module = import_module("regime_map_app.diff_surface.pipeline")
 validation_module = import_module("regime_map_app.diff_surface.validation")
 visualization_module = import_module("regime_map_app.diff_surface.visualization")
 
-DiffSurfaceJobConfig = models.DiffSurfaceJobConfig
 DifferentialSurfaceResult = models.DifferentialSurfaceResult
 LineFit = models.LineFit
 SurfaceMode = models.SurfaceMode
@@ -25,46 +24,50 @@ resolve_export_paths = validation_module.resolve_export_paths
 save_plot = visualization_module.save_plot
 
 
-def _write_success_surface_csv(path: Path) -> None:
-    path.write_text(
-        "\n".join(
+def _build_result() -> DifferentialSurfaceResult:
+    return DifferentialSurfaceResult(
+        input_path=Path("surface.csv"),
+        surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
+        fuel_axis=np.array([0.0, 1.0, 2.0, 3.0]),
+        additive_axis=np.array([0.0, 1.0, 2.0, 3.0]),
+        component_grid=np.array(
             [
-                "fuel;additive;component",
-                "0;0;0",
-                "1;0;5",
-                "2;0;6",
-                "3;0;7",
-                "0;1;4",
-                "1;1;0",
-                "2;1;10",
-                "3;1;11",
-                "0;2;8",
-                "1;2;7",
-                "2;2;0",
-                "3;2;5",
-                "0;3;9",
-                "1;3;8",
-                "2;3;7",
-                "3;3;0",
+                [0.0, 5.0, 6.0, 7.0],
+                [4.0, 0.0, 10.0, 11.0],
+                [8.0, 7.0, 0.0, 5.0],
+                [9.0, 8.0, 7.0, 0.0],
             ]
-        )
-        + "\n",
-        encoding="utf-8",
+        ),
+        dz_dx=np.ones((4, 4), dtype=float),
+        dz_dy=np.ones((4, 4), dtype=float),
+        selected_surface=np.array(
+            [
+                [9.0, 3.0, 8.0, 1.0],
+                [4.0, 7.0, 2.0, 9.0],
+                [1.0, 8.0, 9.0, 3.0],
+                [2.0, 6.0, 4.0, 7.0],
+            ]
+        ),
+        left_maxima_points=np.array([[0.0, 0.0], [1.0, 1.0], [1.0, 2.0], [1.0, 3.0]]),
+        right_maxima_points=np.array([[2.0, 0.0], [3.0, 1.0], [2.0, 2.0], [3.0, 3.0]]),
+        left_line_fit=LineFit(slope=1.8, intercept=0.3),
+        right_line_fit=LineFit(slope=1.8, intercept=-3.7),
     )
 
 
 def test_export_creates_png_and_json(tmp_path: Path) -> None:
     input_file = tmp_path / "surface.csv"
     output_dir = tmp_path / "out"
-    _write_success_surface_csv(input_file)
+    input_file.write_text("fuel;additive;component\n0;0;0\n1;0;1\n0;1;1\n1;1;0\n", encoding="utf-8")
+    result = _build_result()
     pipeline = DiffSurfacePipeline()
-    result = pipeline.process_job(
-        DiffSurfaceJobConfig(
-            input_path=input_file,
-            surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
-        )
-    )
     png_path, json_path = resolve_export_paths(output_dir, input_file, SurfaceMode.GRADIENT_MAGNITUDE)
+    result = DifferentialSurfaceResult(
+        **{
+            **result.__dict__,
+            "input_path": input_file,
+        }
+    )
 
     save_plot(result, png_path)
     pipeline.export_line_parameters(result, json_path)
@@ -76,12 +79,15 @@ def test_export_creates_png_and_json(tmp_path: Path) -> None:
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["input_file"] == str(input_file)
     assert payload["surface_mode"] == "grad"
-    assert payload["min_concentration_line"]["points_count"] == 4
-    assert payload["min_concentration_line"]["a"] == pytest.approx(1.0)
-    assert payload["min_concentration_line"]["b"] == pytest.approx(0.0)
+    assert payload["left_max_gradient_line"]["points_count"] == 4
+    assert payload["left_max_gradient_line"]["a"] == pytest.approx(1.8)
+    assert payload["left_max_gradient_line"]["b"] == pytest.approx(0.3)
+    assert payload["right_max_gradient_line"]["points_count"] == 4
+    assert payload["right_max_gradient_line"]["a"] == pytest.approx(1.8)
+    assert payload["right_max_gradient_line"]["b"] == pytest.approx(-3.7)
 
 
-def test_render_result_clips_line_to_surface_bounds() -> None:
+def test_render_result_clips_two_lines_to_surface_bounds() -> None:
     figure = create_figure()
     result = DifferentialSurfaceResult(
         input_path=Path("surface.csv"),
@@ -92,16 +98,21 @@ def test_render_result_clips_line_to_surface_bounds() -> None:
         dz_dx=np.array([[1.0, 1.0], [1.0, 1.0]]),
         dz_dy=np.array([[1.0, 1.0], [1.0, 1.0]]),
         selected_surface=np.array([[1.0, 1.0], [1.0, 1.0]]),
-        minima_points=np.array([[0.0, 0.0], [1.0, 1.0]]),
-        minima_line_fit=LineFit(slope=2.0, intercept=-1.0),
+        left_maxima_points=np.array([[0.0, 0.0], [1.0, 1.0]]),
+        right_maxima_points=np.array([[0.0, 1.0], [1.0, 0.0]]),
+        left_line_fit=LineFit(slope=2.0, intercept=-1.0),
+        right_line_fit=LineFit(slope=-2.0, intercept=2.0),
     )
 
     render_result(figure, result)
 
     main_axis = figure.axes[0]
-    line = main_axis.lines[0]
+    first_line = main_axis.lines[0]
+    second_line = main_axis.lines[1]
 
-    assert np.allclose(line.get_xdata(), np.array([0.5, 1.0]))
-    assert np.allclose(line.get_ydata(), np.array([0.0, 1.0]))
+    assert np.allclose(first_line.get_xdata(), np.array([0.5, 1.0]))
+    assert np.allclose(first_line.get_ydata(), np.array([0.0, 1.0]))
+    assert np.allclose(second_line.get_xdata(), np.array([0.5, 1.0]))
+    assert np.allclose(second_line.get_ydata(), np.array([1.0, 0.0]))
     assert main_axis.get_xlim() == pytest.approx((0.0, 1.0))
     assert main_axis.get_ylim() == pytest.approx((0.0, 1.0))

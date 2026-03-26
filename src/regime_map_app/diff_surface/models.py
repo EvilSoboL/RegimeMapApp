@@ -47,5 +47,7 @@ class DifferentialSurfaceResult:
     dz_dx: NDArray
     dz_dy: NDArray
     selected_surface: NDArray
-    minima_points: NDArray
-    minima_line_fit: LineFit
+    left_maxima_points: NDArray
+    right_maxima_points: NDArray
+    left_line_fit: LineFit
+    right_line_fit: LineFit

@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 
 from .exceptions import SaveError
-from .models import DifferentialSurfaceResult
+from .models import DifferentialSurfaceResult, LineFit
 
 
 def create_figure() -> Figure:
@@ -31,32 +31,49 @@ def render_result(figure: Figure, result: DifferentialSurfaceResult) -> None:
     contour = axis.contourf(fuel_grid, additive_grid, result.selected_surface, levels=levels, cmap="viridis")
     figure.colorbar(contour, ax=axis, label=result.surface_mode.label)
 
-    clipped_segment = _clip_line_to_surface_bounds(
+    axis.scatter(
+        result.left_maxima_points[:, 0],
+        result.left_maxima_points[:, 1],
+        s=26,
+        c="white",
+        edgecolors="#d62728",
+        linewidths=0.9,
+        label="Точки максимумов слева",
+    )
+    axis.scatter(
+        result.right_maxima_points[:, 0],
+        result.right_maxima_points[:, 1],
+        s=26,
+        c="white",
+        edgecolors="#1f77b4",
+        linewidths=0.9,
+        label="Точки максимумов справа",
+    )
+
+    _plot_clipped_line(
+        axis,
         result.fuel_axis,
         result.additive_axis,
-        result.minima_line_fit.slope,
-        result.minima_line_fit.intercept,
+        result.left_line_fit,
+        color="#d62728",
+        label=_line_label("Левая линия максимумов", result.left_line_fit.slope, result.left_line_fit.intercept),
     )
-    if clipped_segment is not None:
-        line_x, line_y = clipped_segment
-        axis.plot(
-            line_x,
-            line_y,
-            color="#d62728",
-            linewidth=2.0,
-            label=_line_label(
-                "Линия минимумов концентрации",
-                result.minima_line_fit.slope,
-                result.minima_line_fit.intercept,
-            ),
-        )
+    _plot_clipped_line(
+        axis,
+        result.fuel_axis,
+        result.additive_axis,
+        result.right_line_fit,
+        color="#1f77b4",
+        label=_line_label("Правая линия максимумов", result.right_line_fit.slope, result.right_line_fit.intercept),
+    )
 
     axis.set_xlabel("fuel")
     axis.set_ylabel("additive")
     axis.set_xlim(float(result.fuel_axis.min()), float(result.fuel_axis.max()))
     axis.set_ylim(float(result.additive_axis.min()), float(result.additive_axis.max()))
     axis.set_title(f"Дифференциальная поверхность: {result.surface_mode.label}")
-    if axis.lines:
+    handles, labels = axis.get_legend_handles_labels()
+    if handles:
         axis.legend(loc="best")
     figure.tight_layout()
     _draw_if_possible(figure)
@@ -83,6 +100,34 @@ def _build_levels(surface: np.ndarray) -> int | np.ndarray:
 
 def _line_label(prefix: str, slope: float, intercept: float) -> str:
     return f"{prefix}: y = {slope:.3g}x + {intercept:.3g}"
+
+
+def _plot_clipped_line(
+    axis,
+    fuel_axis: np.ndarray,
+    additive_axis: np.ndarray,
+    line_fit: LineFit,
+    *,
+    color: str,
+    label: str,
+) -> None:
+    clipped_segment = _clip_line_to_surface_bounds(
+        fuel_axis,
+        additive_axis,
+        line_fit.slope,
+        line_fit.intercept,
+    )
+    if clipped_segment is None:
+        return
+
+    line_x, line_y = clipped_segment
+    axis.plot(
+        line_x,
+        line_y,
+        color=color,
+        linewidth=2.0,
+        label=label,
+    )
 
 
 def _clip_line_to_surface_bounds(

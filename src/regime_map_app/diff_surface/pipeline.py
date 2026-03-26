@@ -150,28 +150,49 @@ class DiffSurfacePipeline:
             raise ProcessingError("Поддерживается только режим поверхности |grad|.")
         return np.sqrt(np.square(dz_dx) + np.square(dz_dy))
 
-    def find_minima_points(
+    def split_fuel_axis_by_midpoint(
         self,
-        component_grid: np.ndarray,
+        fuel_axis: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        midpoint = float(fuel_axis[0] + fuel_axis[-1]) / 2.0
+        left_mask = fuel_axis <= midpoint
+        right_mask = fuel_axis > midpoint
+        if not left_mask.any() or not right_mask.any():
+            raise ProcessingError("Не удалось разделить ось fuel на левую и правую части.")
+        if np.count_nonzero(left_mask) < 2 or np.count_nonzero(right_mask) < 2:
+            raise ProcessingError(
+                "Для аппроксимации двух линий максимумов нужно минимум два значения fuel слева и справа от середины диапазона."
+            )
+        return left_mask, right_mask
+
+    def find_maxima_points(
+        self,
+        surface: np.ndarray,
         fuel_axis: np.ndarray,
         additive_axis: np.ndarray,
-    ) -> np.ndarray:
-        min_indices = np.argmin(component_grid, axis=0)
-        return np.column_stack((fuel_axis, additive_axis[min_indices])).astype(float)
+    ) -> tuple[np.ndarray, np.ndarray]:
+        left_mask, right_mask = self.split_fuel_axis_by_midpoint(fuel_axis)
+        left_surface = surface[:, left_mask]
+        right_surface = surface[:, right_mask]
+
+        left_max_indices = np.argmax(left_surface, axis=1)
+        right_max_indices = np.argmax(right_surface, axis=1)
+
+        left_points = np.column_stack((fuel_axis[left_mask][left_max_indices], additive_axis)).astype(float)
+        right_points = np.column_stack((fuel_axis[right_mask][right_max_indices], additive_axis)).astype(float)
+        return left_points, right_points
 
     def fit_line(self, points: np.ndarray, line_label: str) -> LineFit:
         if len(points) < 2:
-            raise ProcessingError(f"Для аппроксимации {line_label} линии нужно минимум две точки.")
+            raise ProcessingError(f"Для аппроксимации {line_label} нужно минимум две точки.")
         if np.unique(points[:, 0]).size < 2:
-            raise ProcessingError(
-                f"Для аппроксимации {line_label} линии нужны точки с разными значениями fuel."
-            )
+            raise ProcessingError(f"Для аппроксимации {line_label} нужны точки с разными значениями fuel.")
         try:
             slope, intercept = np.polyfit(points[:, 0], points[:, 1], deg=1)
         except Exception as exc:
-            raise ProcessingError(f"Не удалось аппроксимировать {line_label} линию: {exc}") from exc
+            raise ProcessingError(f"Не удалось аппроксимировать {line_label}: {exc}") from exc
         if not np.isfinite((slope, intercept)).all():
-            raise ProcessingError(f"Коэффициенты {line_label} линии получились некорректными.")
+            raise ProcessingError(f"Коэффициенты {line_label} получились некорректными.")
         return LineFit(slope=float(slope), intercept=float(intercept))
 
     def process_job(
@@ -194,10 +215,7 @@ class DiffSurfacePipeline:
 
         self._check_cancel(should_cancel)
         fuel_axis, additive_axis, component_grid = self.build_regular_grid(frame)
-        self._emit_log(
-            on_log,
-            f"Построена регулярная сетка {len(fuel_axis)}x{len(additive_axis)}.",
-        )
+        self._emit_log(on_log, f"Построена регулярная сетка {len(fuel_axis)}x{len(additive_axis)}.")
         self._emit_progress(on_progress, 40)
 
         self._check_cancel(should_cancel)
@@ -207,16 +225,21 @@ class DiffSurfacePipeline:
         self._emit_progress(on_progress, 60)
 
         self._check_cancel(should_cancel)
-        minima_points = self.find_minima_points(component_grid, fuel_axis, additive_axis)
-        self._emit_log(on_log, f"Найдено точек минимумов концентрации: {len(minima_points)}.")
+        left_maxima_points, right_maxima_points = self.find_maxima_points(selected_surface, fuel_axis, additive_axis)
+        self._emit_log(on_log, f"Найдено точек максимумов слева: {len(left_maxima_points)}.")
+        self._emit_log(on_log, f"Найдено точек максимумов справа: {len(right_maxima_points)}.")
         self._emit_progress(on_progress, 80)
 
         self._check_cancel(should_cancel)
-        minima_line_fit = self.fit_line(minima_points, "минимумов концентрации")
+        left_line_fit = self.fit_line(left_maxima_points, "левой линии максимумов")
+        right_line_fit = self.fit_line(right_maxima_points, "правой линии максимумов")
         self._emit_log(
             on_log,
-            "Линия минимумов концентрации: "
-            f"additive = {minima_line_fit.slope:.6g} * fuel + {minima_line_fit.intercept:.6g}",
+            f"Левая линия максимумов: additive = {left_line_fit.slope:.6g} * fuel + {left_line_fit.intercept:.6g}",
+        )
+        self._emit_log(
+            on_log,
+            f"Правая линия максимумов: additive = {right_line_fit.slope:.6g} * fuel + {right_line_fit.intercept:.6g}",
         )
         self._emit_progress(on_progress, 100)
 
@@ -229,18 +252,25 @@ class DiffSurfacePipeline:
             dz_dx=dz_dx,
             dz_dy=dz_dy,
             selected_surface=np.asarray(selected_surface, dtype=float),
-            minima_points=minima_points,
-            minima_line_fit=minima_line_fit,
+            left_maxima_points=left_maxima_points,
+            right_maxima_points=right_maxima_points,
+            left_line_fit=left_line_fit,
+            right_line_fit=right_line_fit,
         )
 
     def export_line_parameters(self, result: DifferentialSurfaceResult, output_path: Path) -> None:
         payload = {
             "input_file": str(result.input_path),
             "surface_mode": result.surface_mode.value,
-            "min_concentration_line": {
-                "points_count": int(len(result.minima_points)),
-                "a": result.minima_line_fit.slope,
-                "b": result.minima_line_fit.intercept,
+            "left_max_gradient_line": {
+                "points_count": int(len(result.left_maxima_points)),
+                "a": result.left_line_fit.slope,
+                "b": result.left_line_fit.intercept,
+            },
+            "right_max_gradient_line": {
+                "points_count": int(len(result.right_maxima_points)),
+                "a": result.right_line_fit.slope,
+                "b": result.right_line_fit.intercept,
             },
         }
         output_path.parent.mkdir(parents=True, exist_ok=True)
