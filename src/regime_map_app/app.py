@@ -10,9 +10,9 @@ if __package__ in (None, ""):
     project_src = Path(__file__).resolve().parents[1]
     if str(project_src) not in sys.path:
         sys.path.insert(0, str(project_src))
-    ApproxModuleWindow = import_module("regime_map_app.approx.ui").ApproxModuleWindow
+    RegimeMapMainWindow = import_module("regime_map_app.main_window").RegimeMapMainWindow
 else:
-    from .approx.ui import ApproxModuleWindow
+    from .main_window import RegimeMapMainWindow
 
 
 def create_application() -> QApplication:
@@ -25,6 +25,6 @@ def create_application() -> QApplication:
 
 def main() -> int:
     app = create_application()
-    window = ApproxModuleWindow()
+    window = RegimeMapMainWindow()
     window.show()
     return app.exec()

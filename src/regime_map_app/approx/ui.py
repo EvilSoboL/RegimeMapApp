@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThread, QUrl
+from PySide6.QtCore import QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -29,6 +29,8 @@ from .worker import ApproxWorker
 
 
 class ApproxModuleWidget(QWidget):
+    output_ready = Signal(str)
+
     def __init__(self, pipeline: ApproxPipeline | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.pipeline = pipeline or ApproxPipeline()
@@ -122,7 +124,7 @@ class ApproxModuleWidget(QWidget):
         self.median_size_spin.setRange(0, 999)
         self.median_size_spin.setValue(20)
         self.median_size_spin.setEnabled(False)
-        layout.addRow("median_size:", self.median_size_spin)
+        layout.addRow("Размер окна медианной фильтрации:", self.median_size_spin)
 
         self.clamp_zero_checkbox = QCheckBox("Обнулять отрицательные значения")
         self.clamp_zero_checkbox.setChecked(True)
@@ -386,6 +388,8 @@ class ApproxModuleWidget(QWidget):
         self.append_log(
             f"Итог: обработано {summary.total_files}, успешно {summary.succeeded}, с ошибками {summary.failed}."
         )
+        if summary.last_output_path is not None:
+            self.output_ready.emit(str(summary.last_output_path))
 
     def _on_failed(self, message: str) -> None:
         self.append_log(message)
