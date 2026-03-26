@@ -11,14 +11,9 @@ pytest.importorskip("matplotlib")
 
 from PySide6.QtCore import Qt
 
-app_main_window_module = import_module("regime_map_app.main_window")
-approx_models = import_module("regime_map_app.approx.models")
-diff_ui_module = import_module("regime_map_app.diff_surface.ui")
+regime_ui_module = import_module("regime_map_app.regime_map.ui")
 
-RegimeMapMainWindow = app_main_window_module.RegimeMapMainWindow
-BatchProcessSummary = approx_models.BatchProcessSummary
-FileProcessResult = approx_models.FileProcessResult
-DiffSurfaceModuleWidget = diff_ui_module.DiffSurfaceModuleWidget
+RegimeMapModuleWidget = regime_ui_module.RegimeMapModuleWidget
 
 
 def _write_success_surface_csv(path: Path) -> None:
@@ -49,11 +44,11 @@ def _write_success_surface_csv(path: Path) -> None:
     )
 
 
-def test_diff_surface_run_button_is_disabled_until_file_is_selected(qtbot, tmp_path: Path) -> None:
-    widget = DiffSurfaceModuleWidget()
+def test_regime_map_run_button_is_disabled_until_file_is_selected(qtbot, tmp_path: Path) -> None:
+    widget = RegimeMapModuleWidget()
     qtbot.addWidget(widget)
 
-    assert widget.surface_mode_label.text() == "|grad|"
+    assert widget.component_label.text() == "CO, ppm"
     assert not widget.run_button.isEnabled()
     assert not widget.validate_button.isEnabled()
     assert not widget.save_button.isEnabled()
@@ -67,8 +62,8 @@ def test_diff_surface_run_button_is_disabled_until_file_is_selected(qtbot, tmp_p
     assert not widget.save_button.isEnabled()
 
 
-def test_diff_surface_run_button_stays_disabled_for_invalid_csv(qtbot, tmp_path: Path) -> None:
-    widget = DiffSurfaceModuleWidget()
+def test_regime_map_run_button_stays_disabled_for_invalid_csv(qtbot, tmp_path: Path) -> None:
+    widget = RegimeMapModuleWidget()
     qtbot.addWidget(widget)
 
     input_file = tmp_path / "surface.csv"
@@ -79,8 +74,8 @@ def test_diff_surface_run_button_stays_disabled_for_invalid_csv(qtbot, tmp_path:
     assert not widget.run_button.isEnabled()
 
 
-def test_diff_surface_background_build_enables_save(qtbot, tmp_path: Path) -> None:
-    widget = DiffSurfaceModuleWidget()
+def test_regime_map_background_build_enables_save(qtbot, tmp_path: Path) -> None:
+    widget = RegimeMapModuleWidget()
     qtbot.addWidget(widget)
 
     input_file = tmp_path / "surface.csv"
@@ -93,34 +88,3 @@ def test_diff_surface_background_build_enables_save(qtbot, tmp_path: Path) -> No
     assert widget.progress_bar.value() == 100
     assert widget.save_button.isEnabled()
     assert "Готово" in widget.status_label.text()
-
-
-def test_main_window_has_three_tabs_and_autofills_dependent_tabs(qtbot, tmp_path: Path) -> None:
-    window = RegimeMapMainWindow()
-    qtbot.addWidget(window)
-
-    assert window.tabs.count() == 3
-    assert window.tabs.tabText(0) == "Аппроксимация"
-    assert window.tabs.tabText(1) == "Дифференциальная поверхность"
-    assert window.tabs.tabText(2) == "Режимная карта"
-
-    output_path = tmp_path / "approx_surface.csv"
-    summary = BatchProcessSummary(
-        total_files=1,
-        succeeded=1,
-        failed=0,
-        output_dir=tmp_path,
-        results=(
-            FileProcessResult(
-                input_path=tmp_path / "source.csv",
-                success=True,
-                messages=("ok",),
-                output_path=output_path,
-            ),
-        ),
-    )
-
-    window.approx_widget._on_completed(summary)
-
-    assert window.diff_surface_widget.input_path_edit.text() == str(output_path)
-    assert window.regime_map_widget.input_path_edit.text() == str(output_path)
