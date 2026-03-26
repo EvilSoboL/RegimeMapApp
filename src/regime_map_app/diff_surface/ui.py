@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from .exceptions import DiffSurfaceError
 from .models import DiffSurfaceJobConfig, DifferentialSurfaceResult, SurfaceMode
 from .pipeline import DiffSurfacePipeline
-from .validation import resolve_export_paths, validate_job_config
+from .validation import resolve_export_path, validate_job_config
 from .visualization import create_figure, render_placeholder, render_result, save_plot
 from .worker import DiffSurfaceWorker
 
@@ -222,7 +222,7 @@ class DiffSurfaceModuleWidget(QWidget):
             return
 
         output_dir = Path(directory)
-        png_path, json_path = resolve_export_paths(
+        png_path = resolve_export_path(
             output_dir,
             self._last_result.input_path,
             self._last_result.surface_mode,
@@ -230,14 +230,12 @@ class DiffSurfaceModuleWidget(QWidget):
 
         try:
             save_plot(self._last_result, png_path)
-            self.pipeline.export_line_parameters(self._last_result, json_path)
         except DiffSurfaceError as exc:
             self.append_log(str(exc))
             self.status_label.setText("Статус: ошибка сохранения")
             return
 
         self.append_log(f"Сохранен график: {png_path.name}")
-        self.append_log(f"Сохранены параметры линий: {json_path.name}")
         self.status_label.setText("Статус: результаты сохранены")
 
     def append_log(self, message: str) -> None:

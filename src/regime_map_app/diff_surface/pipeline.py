@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 from typing import Callable
 
 import numpy as np
 import pandas as pd
 
-from .exceptions import CancellationError, CsvValidationError, DiffSurfaceError, ProcessingError, SaveError, ValidationError
+from .exceptions import CancellationError, CsvValidationError, DiffSurfaceError, ProcessingError, ValidationError
 from .models import (
     CSV_SEPARATOR,
     REQUIRED_COLUMNS,
@@ -331,32 +330,6 @@ class DiffSurfacePipeline:
             left_line_fit=left_line_fit,
             right_line_fit=right_line_fit,
         )
-
-    def export_line_parameters(self, result: DifferentialSurfaceResult, output_path: Path) -> None:
-        payload = {
-            "input_file": str(result.input_path),
-            "surface_mode": result.surface_mode.value,
-            "min_concentration_line": {
-                "points_count": int(len(result.minima_points)),
-                "a": result.minima_line_fit.slope,
-                "b": result.minima_line_fit.intercept,
-            },
-            "left_max_gradient_line": {
-                "points_count": int(len(result.left_maxima_points)),
-                "a": result.left_line_fit.slope,
-                "b": result.left_line_fit.intercept,
-            },
-            "right_max_gradient_line": {
-                "points_count": int(len(result.right_maxima_points)),
-                "a": result.right_line_fit.slope,
-                "b": result.right_line_fit.intercept,
-            },
-        }
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        except OSError as exc:
-            raise SaveError(f"Не удалось сохранить параметры линий в {output_path}: {exc}") from exc
 
     def _emit_log(self, callback: LogCallback | None, message: str) -> None:
         if callback is not None:

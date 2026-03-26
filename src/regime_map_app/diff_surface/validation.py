@@ -27,6 +27,6 @@ def generate_export_basename(input_path: Path, surface_mode: SurfaceMode) -> str
     return f"diff_surface_{input_path.stem}_{surface_mode.value}"
 
 
-def resolve_export_paths(output_dir: Path, input_path: Path, surface_mode: SurfaceMode) -> tuple[Path, Path]:
+def resolve_export_path(output_dir: Path, input_path: Path, surface_mode: SurfaceMode) -> Path:
     basename = generate_export_basename(input_path, surface_mode)
-    return output_dir / f"{basename}.png", output_dir / f"{basename}_lines.json"
+    return output_dir / f"{basename}.png"

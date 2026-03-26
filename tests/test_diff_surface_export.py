@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from importlib import import_module
 from pathlib import Path
 
@@ -10,17 +9,15 @@ import pytest
 pytest.importorskip("matplotlib")
 
 models = import_module("regime_map_app.diff_surface.models")
-pipeline_module = import_module("regime_map_app.diff_surface.pipeline")
 validation_module = import_module("regime_map_app.diff_surface.validation")
 visualization_module = import_module("regime_map_app.diff_surface.visualization")
 
 DifferentialSurfaceResult = models.DifferentialSurfaceResult
 LineFit = models.LineFit
 SurfaceMode = models.SurfaceMode
-DiffSurfacePipeline = pipeline_module.DiffSurfacePipeline
 create_figure = visualization_module.create_figure
 render_result = visualization_module.render_result
-resolve_export_paths = validation_module.resolve_export_paths
+resolve_export_path = validation_module.resolve_export_path
 save_plot = visualization_module.save_plot
 
 
@@ -57,33 +54,18 @@ def _build_result(input_path: Path) -> DifferentialSurfaceResult:
     )
 
 
-def test_export_creates_png_and_json(tmp_path: Path) -> None:
+def test_export_creates_png_only(tmp_path: Path) -> None:
     input_file = tmp_path / "surface.csv"
     output_dir = tmp_path / "out"
     input_file.write_text("fuel;additive;component\n0;0;0\n1;0;1\n0;1;1\n1;1;0\n", encoding="utf-8")
     result = _build_result(input_file)
-    pipeline = DiffSurfacePipeline()
-    png_path, json_path = resolve_export_paths(output_dir, input_file, SurfaceMode.GRADIENT_MAGNITUDE)
+    png_path = resolve_export_path(output_dir, input_file, SurfaceMode.GRADIENT_MAGNITUDE)
 
     save_plot(result, png_path)
-    pipeline.export_line_parameters(result, json_path)
 
     assert png_path.exists()
     assert png_path.stat().st_size > 0
-    assert json_path.exists()
-
-    payload = json.loads(json_path.read_text(encoding="utf-8"))
-    assert payload["input_file"] == str(input_file)
-    assert payload["surface_mode"] == "grad"
-    assert payload["min_concentration_line"]["points_count"] == 4
-    assert payload["min_concentration_line"]["a"] == pytest.approx(1.0)
-    assert payload["min_concentration_line"]["b"] == pytest.approx(0.0)
-    assert payload["left_max_gradient_line"]["points_count"] == 4
-    assert payload["left_max_gradient_line"]["a"] == pytest.approx(1.2)
-    assert payload["left_max_gradient_line"]["b"] == pytest.approx(0.1)
-    assert payload["right_max_gradient_line"]["points_count"] == 4
-    assert payload["right_max_gradient_line"]["a"] == pytest.approx(0.9)
-    assert payload["right_max_gradient_line"]["b"] == pytest.approx(0.2)
+    assert png_path.name == "diff_surface_surface_grad.png"
 
 
 def test_render_result_clips_three_lines_to_surface_bounds() -> None:
