@@ -4,14 +4,17 @@ from importlib import import_module
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 regime_models = import_module("regime_map_app.regime_map.models")
 regime_pipeline_module = import_module("regime_map_app.regime_map.pipeline")
 diff_models = import_module("regime_map_app.diff_surface.models")
 
+AUTO_CONTOUR_LEVELS = regime_models.AUTO_CONTOUR_LEVELS
+CO_COMPONENT_LABEL = regime_models.CO_COMPONENT_LABEL
+GENERIC_COMPONENT_LABEL = regime_models.GENERIC_COMPONENT_LABEL
 RegimeMapJobConfig = regime_models.RegimeMapJobConfig
 RegimeMapPipeline = regime_pipeline_module.RegimeMapPipeline
-CO_LEVELS = regime_models.CO_LEVELS
 LineFit = diff_models.LineFit
 DifferentialSurfaceResult = diff_models.DifferentialSurfaceResult
 DiffSurfaceValidationResult = diff_models.ValidationResult
@@ -61,21 +64,9 @@ class StubDiffPipeline:
         return self.result
 
 
-def test_validate_inputs_reuses_diff_surface_csv_rules(tmp_path: Path) -> None:
-    input_file = tmp_path / "surface.csv"
-    input_file.write_text("fuel,additive,component\n0,0,1\n", encoding="utf-8")
-
-    validation = RegimeMapPipeline().validate_inputs(RegimeMapJobConfig(input_path=input_file))
-
-    assert not validation.is_valid
-    assert any("разделитель" in error.lower() for error in validation.errors)
-
-
-def test_process_job_uses_diff_surface_result_and_builds_mean_line(tmp_path: Path) -> None:
-    input_file = tmp_path / "surface.csv"
-    _write_success_surface_csv(input_file)
-    diff_result = DifferentialSurfaceResult(
-        input_path=input_file,
+def _build_diff_result(input_path: Path) -> DifferentialSurfaceResult:
+    return DifferentialSurfaceResult(
+        input_path=input_path,
         surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
         fuel_axis=np.array([0.0, 1.0, 2.0]),
         additive_axis=np.array([0.0, 1.0, 2.0]),
@@ -90,16 +81,76 @@ def test_process_job_uses_diff_surface_result_and_builds_mean_line(tmp_path: Pat
         left_line_fit=LineFit(slope=1.1, intercept=0.0),
         right_line_fit=LineFit(slope=-0.2, intercept=1.0),
     )
-    stub_diff_pipeline = StubDiffPipeline(diff_result)
+
+
+def test_validate_inputs_reuses_diff_surface_csv_rules(tmp_path: Path) -> None:
+    input_file = tmp_path / "surface.csv"
+    input_file.write_text("fuel,additive,component\n0,0,1\n", encoding="utf-8")
+
+    validation = RegimeMapPipeline().validate_inputs(RegimeMapJobConfig(input_path=input_file))
+
+    assert not validation.is_valid
+    assert any("разделитель" in error.lower() for error in validation.errors)
+
+
+def test_process_job_uses_diff_surface_result_with_auto_ranges_and_non_co_overlay_rules(tmp_path: Path) -> None:
+    input_file = tmp_path / "surface.csv"
+    _write_success_surface_csv(input_file)
+    stub_diff_pipeline = StubDiffPipeline(_build_diff_result(input_file))
     pipeline = RegimeMapPipeline(diff_pipeline=stub_diff_pipeline)
 
-    result = pipeline.process_job(RegimeMapJobConfig(input_path=input_file))
+    result = pipeline.process_job(
+        RegimeMapJobConfig(
+            input_path=input_file,
+            is_co_component=False,
+            show_min_line=True,
+            show_right_line=True,
+            show_mean_line=True,
+        )
+    )
 
     assert stub_diff_pipeline.processed_config.input_path == input_file
     assert stub_diff_pipeline.processed_config.surface_mode is SurfaceMode.GRADIENT_MAGNITUDE
-    assert np.array_equal(result.component_grid, diff_result.component_grid)
-    assert result.minima_line_fit == diff_result.minima_line_fit
-    assert result.right_line_fit == diff_result.right_line_fit
-    assert result.mean_line_fit.slope == 0.4
-    assert result.mean_line_fit.intercept == 0.55
-    assert np.array_equal(result.co_levels, CO_LEVELS)
+    assert result.component_label == GENERIC_COMPONENT_LABEL
+    assert result.co_levels == AUTO_CONTOUR_LEVELS
+    assert result.x_limits is None
+    assert result.y_limits is None
+    assert result.show_min_line is True
+    assert result.show_right_line is False
+    assert result.show_mean_line is True
+    assert result.mean_line_fit.slope == pytest.approx(0.4)
+    assert result.mean_line_fit.intercept == pytest.approx(0.55)
+
+
+def test_process_job_supports_custom_ranges_and_ppm_scale(tmp_path: Path) -> None:
+    input_file = tmp_path / "surface.csv"
+    _write_success_surface_csv(input_file)
+    stub_diff_pipeline = StubDiffPipeline(_build_diff_result(input_file))
+    pipeline = RegimeMapPipeline(diff_pipeline=stub_diff_pipeline)
+
+    result = pipeline.process_job(
+        RegimeMapJobConfig(
+            input_path=input_file,
+            is_co_component=True,
+            show_min_line=True,
+            show_right_line=True,
+            show_mean_line=False,
+            use_custom_x_limits=True,
+            x_min=0.7,
+            x_max=1.3,
+            use_custom_y_limits=True,
+            y_min=0.6,
+            y_max=1.0,
+            use_custom_ppm_scale=True,
+            ppm_min=0.0,
+            ppm_max=200.0,
+            ppm_step=25.0,
+        )
+    )
+
+    assert result.component_label == CO_COMPONENT_LABEL
+    assert np.array_equal(result.co_levels, np.arange(0.0, 201.0, 25.0))
+    assert result.x_limits == pytest.approx((0.7, 1.3))
+    assert result.y_limits == pytest.approx((0.6, 1.0))
+    assert result.show_right_line is True
+    assert result.show_mean_line is False

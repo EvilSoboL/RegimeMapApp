@@ -8,7 +8,7 @@ from matplotlib import colormaps
 from matplotlib.figure import Figure
 
 from .exceptions import SaveError
-from .models import REGIME_MAP_COMPONENT_LABEL, REGIME_MAP_X_LIMITS, REGIME_MAP_Y_LIMITS, RegimeMapResult
+from .models import RegimeMapResult
 
 
 def create_figure() -> Figure:
@@ -30,48 +30,73 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
     fuel_grid, additive_grid = np.meshgrid(result.fuel_axis, result.additive_axis)
     cmap = colormaps["viridis"].copy()
     cmap.set_over("darkred")
+
+    contour_kwargs: dict[str, object] = {
+        "cmap": cmap,
+    }
+    if isinstance(result.co_levels, int):
+        contour_kwargs["levels"] = result.co_levels
+        contour_extend = "neither"
+    else:
+        contour_kwargs["levels"] = result.co_levels
+        contour_kwargs["extend"] = "max"
+        contour_kwargs["vmin"] = float(result.co_levels[0])
+        contour_kwargs["vmax"] = float(result.co_levels[-1])
+        contour_extend = "max"
+
     contour = axis.contourf(
         fuel_grid,
         additive_grid,
         result.component_grid,
-        levels=result.co_levels,
-        cmap=cmap,
-        extend="max",
-        vmin=float(result.co_levels[0]),
-        vmax=float(result.co_levels[-1]),
+        **contour_kwargs,
     )
-    colorbar = figure.colorbar(contour, ax=axis, label=REGIME_MAP_COMPONENT_LABEL, extend="max")
-    colorbar.set_ticks(result.co_levels)
+    colorbar = figure.colorbar(contour, ax=axis, label=result.component_label, extend=contour_extend)
+    if not isinstance(result.co_levels, int):
+        colorbar.set_ticks(result.co_levels)
 
-    _plot_clipped_line(
-        axis,
-        result.minima_line_fit.slope,
-        result.minima_line_fit.intercept,
-        color="#d62728",
-        linestyle="--",
-        label=_line_label("Линия минимальной концентрации", result.minima_line_fit.slope, result.minima_line_fit.intercept),
-    )
-    _plot_clipped_line(
-        axis,
-        result.right_line_fit.slope,
-        result.right_line_fit.intercept,
-        color="white",
-        linestyle=":",
-        label=_line_label("Правая линия максимумов", result.right_line_fit.slope, result.right_line_fit.intercept),
-    )
-    _plot_clipped_line(
-        axis,
-        result.mean_line_fit.slope,
-        result.mean_line_fit.intercept,
-        color="#ff7f0e",
-        linestyle="-.",
-        label=_line_label("Средняя линия", result.mean_line_fit.slope, result.mean_line_fit.intercept),
-    )
+    plot_x_limits = result.x_limits or (float(np.min(result.fuel_axis)), float(np.max(result.fuel_axis)))
+    plot_y_limits = result.y_limits or (float(np.min(result.additive_axis)), float(np.max(result.additive_axis)))
+
+    if result.show_min_line:
+        _plot_clipped_line(
+            axis,
+            result.minima_line_fit.slope,
+            result.minima_line_fit.intercept,
+            plot_x_limits,
+            plot_y_limits,
+            color="#d62728",
+            linestyle="--",
+            label=_line_label("Линия минимальной концентрации", result.minima_line_fit.slope, result.minima_line_fit.intercept),
+        )
+    if result.show_right_line:
+        _plot_clipped_line(
+            axis,
+            result.right_line_fit.slope,
+            result.right_line_fit.intercept,
+            plot_x_limits,
+            plot_y_limits,
+            color="white",
+            linestyle=":",
+            label=_line_label("Правая линия максимумов", result.right_line_fit.slope, result.right_line_fit.intercept),
+        )
+    if result.show_mean_line:
+        _plot_clipped_line(
+            axis,
+            result.mean_line_fit.slope,
+            result.mean_line_fit.intercept,
+            plot_x_limits,
+            plot_y_limits,
+            color="#ff7f0e",
+            linestyle="-.",
+            label=_line_label("Средняя линия", result.mean_line_fit.slope, result.mean_line_fit.intercept),
+        )
 
     axis.set_xlabel("Расход топлива, кг/ч")
     axis.set_ylabel("Расход пара, кг/ч")
-    axis.set_xlim(*REGIME_MAP_X_LIMITS)
-    axis.set_ylim(*REGIME_MAP_Y_LIMITS)
+    if result.x_limits is not None:
+        axis.set_xlim(*result.x_limits)
+    if result.y_limits is not None:
+        axis.set_ylim(*result.y_limits)
     axis.set_title(result.input_path.name)
     handles, _labels = axis.get_legend_handles_labels()
     if handles:
@@ -98,12 +123,14 @@ def _plot_clipped_line(
     axis,
     slope: float,
     intercept: float,
+    x_limits: tuple[float, float],
+    y_limits: tuple[float, float],
     *,
     color: str,
     linestyle: str,
     label: str,
 ) -> None:
-    clipped_segment = _clip_line_to_bounds(slope, intercept)
+    clipped_segment = _clip_line_to_bounds(slope, intercept, x_limits, y_limits)
     if clipped_segment is None:
         return
 
@@ -118,9 +145,14 @@ def _plot_clipped_line(
     )
 
 
-def _clip_line_to_bounds(slope: float, intercept: float) -> tuple[np.ndarray, np.ndarray] | None:
-    x_min, x_max = REGIME_MAP_X_LIMITS
-    y_min, y_max = REGIME_MAP_Y_LIMITS
+def _clip_line_to_bounds(
+    slope: float,
+    intercept: float,
+    x_limits: tuple[float, float],
+    y_limits: tuple[float, float],
+) -> tuple[np.ndarray, np.ndarray] | None:
+    x_min, x_max = x_limits
+    y_min, y_max = y_limits
     tolerance = 1e-9
 
     if np.isclose(slope, 0.0):

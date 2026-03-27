@@ -20,6 +20,18 @@ def validate_job_config(config: RegimeMapJobConfig) -> ValidationResult:
     elif input_path.suffix.lower() != ".csv":
         errors.append(f"Файл {input_path.name} должен иметь расширение .csv.")
 
+    if config.use_custom_x_limits and config.x_min >= config.x_max:
+        errors.append("Нижняя граница X должна быть меньше верхней.")
+
+    if config.use_custom_y_limits and config.y_min >= config.y_max:
+        errors.append("Нижняя граница Y должна быть меньше верхней.")
+
+    if config.use_custom_ppm_scale:
+        if config.ppm_min >= config.ppm_max:
+            errors.append("Нижняя граница шкалы ppm должна быть меньше верхней.")
+        if config.ppm_step <= 0:
+            errors.append("Шаг шкалы ppm должен быть положительным.")
+
     return ValidationResult(is_valid=not errors, errors=tuple(errors))
 
 

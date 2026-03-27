@@ -9,7 +9,14 @@ from ..diff_surface.exceptions import DiffSurfaceError
 from ..diff_surface.models import DiffSurfaceJobConfig, LineFit, SurfaceMode
 from ..diff_surface.pipeline import DiffSurfacePipeline
 from .exceptions import CancellationError, ProcessingError, ValidationError
-from .models import CO_LEVELS, RegimeMapJobConfig, RegimeMapResult, ValidationResult
+from .models import (
+    AUTO_CONTOUR_LEVELS,
+    CO_COMPONENT_LABEL,
+    GENERIC_COMPONENT_LABEL,
+    RegimeMapJobConfig,
+    RegimeMapResult,
+    ValidationResult,
+)
 from .validation import validate_job_config
 
 LogCallback = Callable[[str], None]
@@ -58,6 +65,15 @@ class RegimeMapPipeline:
             raise ProcessingError(str(exc)) from exc
 
         mean_line_fit = self.compute_mean_line(diff_result.minima_line_fit, diff_result.right_line_fit)
+        component_label = CO_COMPONENT_LABEL if config.is_co_component else GENERIC_COMPONENT_LABEL
+        show_right_line = config.is_co_component and config.show_right_line
+        x_limits = (float(config.x_min), float(config.x_max)) if config.use_custom_x_limits else None
+        y_limits = (float(config.y_min), float(config.y_max)) if config.use_custom_y_limits else None
+        co_levels = self.resolve_co_levels(config)
+
+        if config.show_right_line and not config.is_co_component:
+            self._emit_log(on_log, "Правая линия максимумов скрыта, потому что флажок CO снят.")
+
         self._emit_log(
             on_log,
             f"Средняя линия: additive = {mean_line_fit.slope:.6g} * fuel + {mean_line_fit.intercept:.6g}",
@@ -68,7 +84,14 @@ class RegimeMapPipeline:
             fuel_axis=np.asarray(diff_result.fuel_axis, dtype=float),
             additive_axis=np.asarray(diff_result.additive_axis, dtype=float),
             component_grid=np.asarray(diff_result.component_grid, dtype=float),
-            co_levels=np.asarray(CO_LEVELS, dtype=float),
+            component_label=component_label,
+            co_levels=co_levels,
+            x_limits=x_limits,
+            y_limits=y_limits,
+            is_co_component=config.is_co_component,
+            show_min_line=config.show_min_line,
+            show_right_line=show_right_line,
+            show_mean_line=config.show_mean_line,
             minima_line_fit=diff_result.minima_line_fit,
             right_line_fit=diff_result.right_line_fit,
             mean_line_fit=mean_line_fit,
@@ -80,6 +103,17 @@ class RegimeMapPipeline:
         if not np.isfinite((slope, intercept)).all():
             raise ProcessingError("Не удалось вычислить среднюю линию между линией минимума и правой линией максимумов.")
         return LineFit(slope=float(slope), intercept=float(intercept))
+
+    def resolve_co_levels(self, config: RegimeMapJobConfig) -> int | np.ndarray:
+        if not config.use_custom_ppm_scale:
+            return AUTO_CONTOUR_LEVELS
+
+        values = np.arange(config.ppm_min, config.ppm_max, config.ppm_step, dtype=float)
+        values = np.append(values, float(config.ppm_max))
+        unique_values = np.unique(values)
+        if unique_values.size < 2:
+            raise ProcessingError("Не удалось сформировать пользовательскую шкалу ppm.")
+        return unique_values
 
     def _to_diff_config(self, config: RegimeMapJobConfig) -> DiffSurfaceJobConfig:
         return DiffSurfaceJobConfig(

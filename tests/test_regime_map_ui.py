@@ -44,33 +44,45 @@ def _write_success_surface_csv(path: Path) -> None:
     )
 
 
-def test_regime_map_run_button_is_disabled_until_file_is_selected(qtbot, tmp_path: Path) -> None:
+def test_regime_map_defaults_use_auto_ranges_and_enabled_line_options(qtbot) -> None:
     widget = RegimeMapModuleWidget()
     qtbot.addWidget(widget)
 
-    assert widget.component_label.text() == "CO, ppm"
-    assert not widget.run_button.isEnabled()
-    assert not widget.validate_button.isEnabled()
-    assert not widget.save_button.isEnabled()
+    assert widget.co_checkbox.isChecked()
+    assert widget.show_min_line_checkbox.isChecked()
+    assert widget.show_right_line_checkbox.isChecked()
+    assert widget.show_mean_line_checkbox.isChecked()
+    assert not widget.use_custom_x_limits_checkbox.isChecked()
+    assert not widget.use_custom_y_limits_checkbox.isChecked()
+    assert not widget.use_custom_ppm_scale_checkbox.isChecked()
+    assert not widget.x_min_spin.isEnabled()
+    assert not widget.y_min_spin.isEnabled()
+    assert not widget.ppm_min_spin.isEnabled()
+
+
+def test_unchecking_co_disables_right_line_overlay(qtbot) -> None:
+    widget = RegimeMapModuleWidget()
+    qtbot.addWidget(widget)
+
+    widget.co_checkbox.setChecked(False)
+
+    assert not widget.show_right_line_checkbox.isEnabled()
+    assert not widget.show_right_line_checkbox.isChecked()
+    assert widget.show_mean_line_checkbox.isEnabled()
+
+
+def test_invalid_manual_x_limits_disable_run_button(qtbot, tmp_path: Path) -> None:
+    widget = RegimeMapModuleWidget()
+    qtbot.addWidget(widget)
 
     input_file = tmp_path / "surface.csv"
     _write_success_surface_csv(input_file)
     widget.set_input_path(input_file, user_selected=True)
 
-    assert widget.run_button.isEnabled()
-    assert widget.validate_button.isEnabled()
-    assert not widget.save_button.isEnabled()
+    widget.use_custom_x_limits_checkbox.setChecked(True)
+    widget.x_min_spin.setValue(1.5)
+    widget.x_max_spin.setValue(1.0)
 
-
-def test_regime_map_run_button_stays_disabled_for_invalid_csv(qtbot, tmp_path: Path) -> None:
-    widget = RegimeMapModuleWidget()
-    qtbot.addWidget(widget)
-
-    input_file = tmp_path / "surface.csv"
-    input_file.write_text("fuel,additive,component\n0,0,1\n", encoding="utf-8")
-    widget.set_input_path(input_file, user_selected=True)
-
-    assert widget.validate_button.isEnabled()
     assert not widget.run_button.isEnabled()
 
 

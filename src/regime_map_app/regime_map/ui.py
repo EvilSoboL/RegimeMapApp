@@ -5,6 +5,8 @@ from pathlib import Path
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -15,12 +17,20 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from .exceptions import RegimeMapError
-from .models import CO_LEVELS, REGIME_MAP_COMPONENT_LABEL, REGIME_MAP_X_LIMITS, REGIME_MAP_Y_LIMITS, RegimeMapJobConfig, RegimeMapResult
+from .models import (
+    CO_COMPONENT_LABEL,
+    DEFAULT_CO_LEVELS,
+    DEFAULT_X_LIMITS,
+    DEFAULT_Y_LIMITS,
+    RegimeMapJobConfig,
+    RegimeMapResult,
+)
 from .pipeline import RegimeMapPipeline
 from .validation import resolve_export_path, validate_job_config
 from .visualization import create_figure, render_placeholder, render_result, save_plot
@@ -41,6 +51,7 @@ class RegimeMapModuleWidget(QWidget):
 
         self._build_ui()
         self._wire_signals()
+        self._refresh_parameter_controls()
         self.refresh_form_state()
         render_placeholder(self.figure, "Результат еще не построен.")
 
@@ -84,17 +95,39 @@ class RegimeMapModuleWidget(QWidget):
         group = QGroupBox("Параметры")
         layout = QFormLayout(group)
 
-        self.component_label = QLabel(REGIME_MAP_COMPONENT_LABEL)
-        self.levels_label = QLabel("0..200, шаг 25")
-        self.x_limits_label = QLabel(f"{REGIME_MAP_X_LIMITS[0]:.1f}..{REGIME_MAP_X_LIMITS[1]:.1f}")
-        self.y_limits_label = QLabel(f"{REGIME_MAP_Y_LIMITS[0]:.1f}..{REGIME_MAP_Y_LIMITS[1]:.1f}")
-        self.lines_label = QLabel("Минимум, правая линия максимумов, средняя")
+        self.co_checkbox = QCheckBox("Использовать CO")
+        self.co_checkbox.setChecked(True)
 
-        layout.addRow("Компонент:", self.component_label)
-        layout.addRow("Шкала CO:", self.levels_label)
-        layout.addRow("Границы X:", self.x_limits_label)
-        layout.addRow("Границы Y:", self.y_limits_label)
-        layout.addRow("Линии:", self.lines_label)
+        self.show_min_line_checkbox = QCheckBox("Наносить")
+        self.show_min_line_checkbox.setChecked(True)
+        self.show_right_line_checkbox = QCheckBox("Наносить")
+        self.show_right_line_checkbox.setChecked(True)
+        self.show_mean_line_checkbox = QCheckBox("Наносить")
+        self.show_mean_line_checkbox.setChecked(True)
+
+        self.use_custom_x_limits_checkbox = QCheckBox("Задать")
+        self.x_min_spin = self._build_float_spin(*DEFAULT_X_LIMITS)
+        self.x_max_spin = self._build_float_spin(*DEFAULT_X_LIMITS, value=DEFAULT_X_LIMITS[1])
+        self.x_limits_widget = self._build_range_widget(self.use_custom_x_limits_checkbox, self.x_min_spin, self.x_max_spin)
+
+        self.use_custom_y_limits_checkbox = QCheckBox("Задать")
+        self.y_min_spin = self._build_float_spin(*DEFAULT_Y_LIMITS)
+        self.y_max_spin = self._build_float_spin(*DEFAULT_Y_LIMITS, value=DEFAULT_Y_LIMITS[1])
+        self.y_limits_widget = self._build_range_widget(self.use_custom_y_limits_checkbox, self.y_min_spin, self.y_max_spin)
+
+        self.use_custom_ppm_scale_checkbox = QCheckBox("Задать")
+        self.ppm_min_spin = self._build_int_spin(int(DEFAULT_CO_LEVELS[0]), int(DEFAULT_CO_LEVELS[-1]), int(DEFAULT_CO_LEVELS[0]))
+        self.ppm_max_spin = self._build_int_spin(int(DEFAULT_CO_LEVELS[0]), 10_000, int(DEFAULT_CO_LEVELS[-1]))
+        self.ppm_step_spin = self._build_int_spin(1, 10_000, int(DEFAULT_CO_LEVELS[1] - DEFAULT_CO_LEVELS[0]))
+        self.ppm_scale_widget = self._build_ppm_widget()
+
+        layout.addRow("CO:", self.co_checkbox)
+        layout.addRow("Линия минимума:", self.show_min_line_checkbox)
+        layout.addRow("Правая линия максимумов:", self.show_right_line_checkbox)
+        layout.addRow("Средняя линия:", self.show_mean_line_checkbox)
+        layout.addRow("Границы X:", self.x_limits_widget)
+        layout.addRow("Границы Y:", self.y_limits_widget)
+        layout.addRow("Шкала ppm:", self.ppm_scale_widget)
         return group
 
     def _build_actions_group(self) -> QGroupBox:
@@ -126,14 +159,84 @@ class RegimeMapModuleWidget(QWidget):
         layout.addWidget(self.log_edit)
         return group
 
+    def _build_float_spin(self, minimum: float, maximum: float, value: float | None = None) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setRange(-1_000_000.0, 1_000_000.0)
+        spin.setDecimals(4)
+        spin.setSingleStep(0.01)
+        spin.setValue(minimum if value is None else value)
+        return spin
+
+    def _build_int_spin(self, minimum: int, maximum: int, value: int) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setValue(value)
+        return spin
+
+    def _build_range_widget(self, checkbox: QCheckBox, lower_spin: QDoubleSpinBox, upper_spin: QDoubleSpinBox) -> QWidget:
+        widget = QWidget(self)
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(checkbox)
+        layout.addWidget(QLabel("от"))
+        layout.addWidget(lower_spin)
+        layout.addWidget(QLabel("до"))
+        layout.addWidget(upper_spin)
+        return widget
+
+    def _build_ppm_widget(self) -> QWidget:
+        widget = QWidget(self)
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.use_custom_ppm_scale_checkbox)
+        layout.addWidget(QLabel("от"))
+        layout.addWidget(self.ppm_min_spin)
+        layout.addWidget(QLabel("до"))
+        layout.addWidget(self.ppm_max_spin)
+        layout.addWidget(QLabel("шаг"))
+        layout.addWidget(self.ppm_step_spin)
+        return widget
+
     def _wire_signals(self) -> None:
         self.select_input_button.clicked.connect(self._choose_input)
         self.validate_button.clicked.connect(self.validate_data)
         self.run_button.clicked.connect(self.start_processing)
         self.save_button.clicked.connect(self.save_results)
 
+        self.co_checkbox.toggled.connect(self._on_parameters_changed)
+        self.show_min_line_checkbox.toggled.connect(self._on_parameters_changed)
+        self.show_right_line_checkbox.toggled.connect(self._on_parameters_changed)
+        self.show_mean_line_checkbox.toggled.connect(self._on_parameters_changed)
+        self.use_custom_x_limits_checkbox.toggled.connect(self._on_parameters_changed)
+        self.use_custom_y_limits_checkbox.toggled.connect(self._on_parameters_changed)
+        self.use_custom_ppm_scale_checkbox.toggled.connect(self._on_parameters_changed)
+
+        self.x_min_spin.valueChanged.connect(self._on_parameters_changed)
+        self.x_max_spin.valueChanged.connect(self._on_parameters_changed)
+        self.y_min_spin.valueChanged.connect(self._on_parameters_changed)
+        self.y_max_spin.valueChanged.connect(self._on_parameters_changed)
+        self.ppm_min_spin.valueChanged.connect(self._on_parameters_changed)
+        self.ppm_max_spin.valueChanged.connect(self._on_parameters_changed)
+        self.ppm_step_spin.valueChanged.connect(self._on_parameters_changed)
+
     def collect_config(self) -> RegimeMapJobConfig:
-        return RegimeMapJobConfig(input_path=self._selected_input_path)
+        return RegimeMapJobConfig(
+            input_path=self._selected_input_path,
+            is_co_component=self.co_checkbox.isChecked(),
+            show_min_line=self.show_min_line_checkbox.isChecked(),
+            show_right_line=self.show_right_line_checkbox.isChecked(),
+            show_mean_line=self.show_mean_line_checkbox.isChecked(),
+            use_custom_x_limits=self.use_custom_x_limits_checkbox.isChecked(),
+            x_min=self.x_min_spin.value(),
+            x_max=self.x_max_spin.value(),
+            use_custom_y_limits=self.use_custom_y_limits_checkbox.isChecked(),
+            y_min=self.y_min_spin.value(),
+            y_max=self.y_max_spin.value(),
+            use_custom_ppm_scale=self.use_custom_ppm_scale_checkbox.isChecked(),
+            ppm_min=float(self.ppm_min_spin.value()),
+            ppm_max=float(self.ppm_max_spin.value()),
+            ppm_step=float(self.ppm_step_spin.value()),
+        )
 
     def refresh_form_state(self) -> None:
         config = self.collect_config()
@@ -143,6 +246,7 @@ class RegimeMapModuleWidget(QWidget):
         self.run_button.setEnabled(run_ready)
         self.save_button.setEnabled(self._last_result is not None and not self._busy)
         self.select_input_button.setEnabled(not self._busy)
+        self._refresh_parameter_controls()
 
     def set_input_path(self, path: Path, *, user_selected: bool) -> None:
         self._selected_input_path = path
@@ -192,8 +296,11 @@ class RegimeMapModuleWidget(QWidget):
         self._last_result = None
         self.log_edit.clear()
         self.append_log(f"Файл: {input_path.name}")
-        self.append_log(f"Компонент: {REGIME_MAP_COMPONENT_LABEL}")
-        self.append_log(f"Шкала CO: {int(CO_LEVELS[0])}..{int(CO_LEVELS[-1])}, шаг {int(CO_LEVELS[1] - CO_LEVELS[0])}")
+        self.append_log(f"CO: {'да' if config.is_co_component else 'нет'}")
+        self.append_log(f"Линии: {self._format_line_list(config)}")
+        self.append_log(f"Границы X: {self._format_range(config.use_custom_x_limits, config.x_min, config.x_max)}")
+        self.append_log(f"Границы Y: {self._format_range(config.use_custom_y_limits, config.y_min, config.y_max)}")
+        self.append_log(f"Шкала ppm: {self._format_ppm_scale(config)}")
         self.progress_bar.setValue(0)
         self.status_label.setText("Статус: запуск фонового построения")
         self._set_busy(True)
@@ -267,15 +374,20 @@ class RegimeMapModuleWidget(QWidget):
     def _on_completed(self, result: RegimeMapResult) -> None:
         self._last_result = result
         render_result(self.figure, result)
-        self.append_log(
-            f"Построение завершено. Линия минимальной концентрации: a={result.minima_line_fit.slope:.6g}, b={result.minima_line_fit.intercept:.6g}."
-        )
-        self.append_log(
-            f"Правая линия максимумов: a={result.right_line_fit.slope:.6g}, b={result.right_line_fit.intercept:.6g}."
-        )
-        self.append_log(
-            f"Средняя линия: a={result.mean_line_fit.slope:.6g}, b={result.mean_line_fit.intercept:.6g}."
-        )
+        if result.show_min_line:
+            self.append_log(
+                f"Построение завершено. Линия минимальной концентрации: a={result.minima_line_fit.slope:.6g}, b={result.minima_line_fit.intercept:.6g}."
+            )
+        if result.show_right_line:
+            self.append_log(
+                f"Правая линия максимумов: a={result.right_line_fit.slope:.6g}, b={result.right_line_fit.intercept:.6g}."
+            )
+        elif not result.is_co_component:
+            self.append_log("Правая линия максимумов не нанесена, потому что флажок CO снят.")
+        if result.show_mean_line:
+            self.append_log(
+                f"Средняя линия: a={result.mean_line_fit.slope:.6g}, b={result.mean_line_fit.intercept:.6g}."
+            )
         self.save_button.setEnabled(True)
 
     def _on_failed(self, message: str) -> None:
@@ -283,6 +395,55 @@ class RegimeMapModuleWidget(QWidget):
 
     def _on_cancelled(self) -> None:
         self.append_log("Построение остановлено пользователем.")
+
+    def _on_parameters_changed(self, *_args) -> None:
+        self._invalidate_result()
+        self._refresh_parameter_controls()
+        self.refresh_form_state()
+
+    def _refresh_parameter_controls(self) -> None:
+        x_enabled = self.use_custom_x_limits_checkbox.isChecked() and not self._busy
+        y_enabled = self.use_custom_y_limits_checkbox.isChecked() and not self._busy
+        ppm_enabled = self.use_custom_ppm_scale_checkbox.isChecked() and not self._busy
+        right_line_enabled = self.co_checkbox.isChecked() and not self._busy
+
+        self.x_min_spin.setEnabled(x_enabled)
+        self.x_max_spin.setEnabled(x_enabled)
+        self.y_min_spin.setEnabled(y_enabled)
+        self.y_max_spin.setEnabled(y_enabled)
+        self.ppm_min_spin.setEnabled(ppm_enabled)
+        self.ppm_max_spin.setEnabled(ppm_enabled)
+        self.ppm_step_spin.setEnabled(ppm_enabled)
+
+        if not self.co_checkbox.isChecked():
+            self.show_right_line_checkbox.setChecked(False)
+        self.show_right_line_checkbox.setEnabled(right_line_enabled)
+        self.co_checkbox.setEnabled(not self._busy)
+        self.show_min_line_checkbox.setEnabled(not self._busy)
+        self.show_mean_line_checkbox.setEnabled(not self._busy)
+        self.use_custom_x_limits_checkbox.setEnabled(not self._busy)
+        self.use_custom_y_limits_checkbox.setEnabled(not self._busy)
+        self.use_custom_ppm_scale_checkbox.setEnabled(not self._busy)
+
+    def _format_line_list(self, config: RegimeMapJobConfig) -> str:
+        names: list[str] = []
+        if config.show_min_line:
+            names.append("минимум")
+        if config.is_co_component and config.show_right_line:
+            names.append("правая линия максимумов")
+        if config.show_mean_line:
+            names.append("средняя")
+        return ", ".join(names) if names else "не наносить"
+
+    def _format_range(self, use_custom: bool, lower: float, upper: float) -> str:
+        if not use_custom:
+            return "авто"
+        return f"{lower:.4g}..{upper:.4g}"
+
+    def _format_ppm_scale(self, config: RegimeMapJobConfig) -> str:
+        if not config.use_custom_ppm_scale:
+            return "авто"
+        return f"{config.ppm_min:.0f}..{config.ppm_max:.0f}, шаг {config.ppm_step:.0f}"
 
 
 class RegimeMapModuleWindow(QMainWindow):
