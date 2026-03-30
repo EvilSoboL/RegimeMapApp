@@ -29,7 +29,7 @@ from .models import (
     SurfaceMode,
 )
 from .pipeline import DiffSurfacePipeline
-from .validation import resolve_export_path, validate_job_config
+from .validation import parse_contour_level_indices, resolve_export_path, validate_job_config
 from .visualization import create_figure, render_placeholder, render_result, save_plot
 from .worker import DiffSurfaceWorker
 
@@ -98,9 +98,19 @@ class DiffSurfaceModuleWidget(QWidget):
             self.maxima_detection_combo.addItem(method.label, method)
         self.contour_levels_edit = QLineEdit(DEFAULT_ANALYSIS_CONTOUR_LEVELS)
         self.contour_levels_edit.setPlaceholderText("Например: 3, 4")
+        self.decrease_contour_levels_button = QPushButton("-1")
+        self.decrease_contour_levels_button.setToolTip("Уменьшить все номера линий уровня на 1")
+        self.increase_contour_levels_button = QPushButton("+1")
+        self.increase_contour_levels_button.setToolTip("Увеличить все номера линий уровня на 1")
+        contour_levels_widget = QWidget(self)
+        contour_levels_layout = QHBoxLayout(contour_levels_widget)
+        contour_levels_layout.setContentsMargins(0, 0, 0, 0)
+        contour_levels_layout.addWidget(self.contour_levels_edit, 1)
+        contour_levels_layout.addWidget(self.decrease_contour_levels_button)
+        contour_levels_layout.addWidget(self.increase_contour_levels_button)
         layout.addRow("Тип поверхности:", self.surface_mode_label)
         layout.addRow("Поиск максимумов:", self.maxima_detection_combo)
-        layout.addRow("Уровни контура:", self.contour_levels_edit)
+        layout.addRow("Уровни контура:", contour_levels_widget)
         return group
 
     def _build_actions_group(self) -> QGroupBox:
@@ -139,6 +149,8 @@ class DiffSurfaceModuleWidget(QWidget):
         self.save_button.clicked.connect(self.save_results)
         self.maxima_detection_combo.currentIndexChanged.connect(self._on_parameters_changed)
         self.contour_levels_edit.textChanged.connect(self._on_parameters_changed)
+        self.decrease_contour_levels_button.clicked.connect(lambda: self._shift_contour_levels(-1))
+        self.increase_contour_levels_button.clicked.connect(lambda: self._shift_contour_levels(1))
 
     def current_surface_mode(self) -> SurfaceMode:
         return SurfaceMode.GRADIENT_MAGNITUDE
@@ -323,6 +335,22 @@ class DiffSurfaceModuleWidget(QWidget):
         self._invalidate_result()
         self.refresh_form_state()
 
+    def _shift_contour_levels(self, delta: int) -> None:
+        try:
+            current_indices = parse_contour_level_indices(self.contour_levels_edit.text())
+        except ValueError:
+            current_indices = parse_contour_level_indices(DEFAULT_ANALYSIS_CONTOUR_LEVELS)
+
+        shifted_indices: list[int] = []
+        seen: set[int] = set()
+        for index in current_indices:
+            shifted_value = max(1, index + delta)
+            if shifted_value not in seen:
+                shifted_indices.append(shifted_value)
+                seen.add(shifted_value)
+
+        self.contour_levels_edit.setText(", ".join(str(index) for index in shifted_indices))
+
     def _refresh_parameter_controls(self) -> None:
         contour_levels_enabled = (
             self.current_maxima_detection_method().uses_contour_levels
@@ -330,6 +358,8 @@ class DiffSurfaceModuleWidget(QWidget):
         )
         self.maxima_detection_combo.setEnabled(not self._busy)
         self.contour_levels_edit.setEnabled(contour_levels_enabled)
+        self.decrease_contour_levels_button.setEnabled(contour_levels_enabled)
+        self.increase_contour_levels_button.setEnabled(contour_levels_enabled)
 
 
 class DiffSurfaceModuleWindow(QMainWindow):

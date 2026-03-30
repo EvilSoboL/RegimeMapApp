@@ -58,6 +58,8 @@ def test_diff_surface_run_button_is_disabled_until_file_is_selected(qtbot, tmp_p
     assert widget.surface_mode_label.text() == "|grad|"
     assert widget.current_maxima_detection_method() is MaximaDetectionMethod.ROW_PEAKS
     assert not widget.contour_levels_edit.isEnabled()
+    assert not widget.decrease_contour_levels_button.isEnabled()
+    assert not widget.increase_contour_levels_button.isEnabled()
     assert not widget.run_button.isEnabled()
     assert not widget.validate_button.isEnabled()
     assert not widget.save_button.isEnabled()
@@ -83,12 +85,35 @@ def test_diff_surface_contour_level_method_enables_level_input_and_validates_tex
 
     assert widget.current_maxima_detection_method() is MaximaDetectionMethod.CONTOUR_LEVELS
     assert widget.contour_levels_edit.isEnabled()
+    assert widget.decrease_contour_levels_button.isEnabled()
+    assert widget.increase_contour_levels_button.isEnabled()
 
     widget.contour_levels_edit.setText("bad")
     assert not widget.run_button.isEnabled()
 
     widget.contour_levels_edit.setText("3, 4")
     assert widget.run_button.isEnabled()
+
+
+def test_diff_surface_contour_level_buttons_shift_values_by_one(qtbot, tmp_path: Path) -> None:
+    widget = DiffSurfaceModuleWidget()
+    qtbot.addWidget(widget)
+
+    input_file = tmp_path / "surface.csv"
+    _write_success_surface_csv(input_file)
+    widget.set_input_path(input_file, user_selected=True)
+    widget.maxima_detection_combo.setCurrentIndex(1)
+    widget.contour_levels_edit.setText("3, 4")
+
+    qtbot.mouseClick(widget.increase_contour_levels_button, Qt.LeftButton)
+    assert widget.contour_levels_edit.text() == "4, 5"
+
+    qtbot.mouseClick(widget.decrease_contour_levels_button, Qt.LeftButton)
+    assert widget.contour_levels_edit.text() == "3, 4"
+
+    widget.contour_levels_edit.setText("1, 2")
+    qtbot.mouseClick(widget.decrease_contour_levels_button, Qt.LeftButton)
+    assert widget.contour_levels_edit.text() == "1"
 
 
 def test_diff_surface_run_button_stays_disabled_for_invalid_csv(qtbot, tmp_path: Path) -> None:
