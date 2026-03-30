@@ -10,9 +10,13 @@ from matplotlib.figure import Figure
 from .exceptions import SaveError
 from .models import RegimeMapResult
 
+BASE_FIGURE_WIDTH = 6.8
+BASE_FIGURE_HEIGHT = 5.6
+HEIGHT_SCALE_FACTOR = 4 / 3
+
 
 def create_figure() -> Figure:
-    return Figure(figsize=(6.8, 5.6))
+    return Figure(figsize=(BASE_FIGURE_WIDTH, BASE_FIGURE_HEIGHT * HEIGHT_SCALE_FACTOR))
 
 
 def render_placeholder(figure: Figure, message: str) -> None:
@@ -80,7 +84,7 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
             plot_y_limits,
             color="#d62728",
             linestyle="--",
-            label=_line_label("Линия минимальной концентрации", result.minima_line_fit.slope, result.minima_line_fit.intercept),
+            label=_line_label("Линия минимальной концентрации"),
         )
     if result.show_right_line:
         _plot_clipped_line(
@@ -91,7 +95,7 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
             plot_y_limits,
             color="white",
             linestyle=":",
-            label=_line_label("Правая линия максимумов", result.right_line_fit.slope, result.right_line_fit.intercept),
+            label=_line_label("Правая линия максимумов"),
         )
     if result.show_mean_line:
         _plot_clipped_line(
@@ -102,7 +106,7 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
             plot_y_limits,
             color="#ff7f0e",
             linestyle="-.",
-            label=_line_label("Средняя линия", result.mean_line_fit.slope, result.mean_line_fit.intercept),
+            label=_line_label("Средняя линия"),
         )
 
     axis.set_xlabel(result.x_axis_label, fontfamily=result.font_family, fontsize=result.font_size)
@@ -117,13 +121,12 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
     if handles:
         axis.legend(
             loc="lower left",
-            bbox_to_anchor=(-0.2, 1.14, 1.4, 0.2),
-            mode="expand",
+            bbox_to_anchor=(0.0, 1.14, 1.0, 0.3),
             borderaxespad=0.0,
-            ncol=min(len(handles), 3),
+            ncol=1,
             prop={"family": result.font_family, "size": result.font_size},
         )
-    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.8))
+    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.75))
     _draw_if_possible(figure)
 
 
@@ -137,8 +140,8 @@ def save_plot(result: RegimeMapResult, output_path: Path) -> None:
         raise SaveError(f"Не удалось сохранить график в {output_path}: {exc}") from exc
 
 
-def _line_label(prefix: str, slope: float, intercept: float) -> str:
-    return f"{prefix}: y = {slope:.3g}x + {intercept:.3g}"
+def _line_label(prefix: str) -> str:
+    return prefix
 
 
 def _plot_clipped_line(

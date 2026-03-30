@@ -88,6 +88,13 @@ def test_export_creates_png_only(tmp_path: Path) -> None:
     assert png_path.name == "regime_map_surface.png"
 
 
+def test_create_figure_uses_extended_height() -> None:
+    figure = create_figure()
+
+    assert figure.get_size_inches()[0] == pytest.approx(6.8)
+    assert figure.get_size_inches()[1] == pytest.approx(5.6 * 4 / 3)
+
+
 def test_render_result_draws_only_requested_lines_and_clips_to_custom_bounds() -> None:
     figure = create_figure()
     render_result(figure, _build_custom_result(Path("surface.csv")))
@@ -113,9 +120,12 @@ def test_render_result_draws_only_requested_lines_and_clips_to_custom_bounds() -
     assert main_axis.title.get_fontfamily() == [DEFAULT_FONT_FAMILY]
     assert colorbar_axis.yaxis.label.get_fontfamily() == [DEFAULT_FONT_FAMILY]
     assert legend is not None
+    legend_texts = [text.get_text() for text in legend.get_texts()]
+    assert legend_texts == ["Линия минимальной концентрации", "Средняя линия"]
+    assert legend._ncols == 1
     bbox = legend.get_bbox_to_anchor().transformed(main_axis.transAxes.inverted())
     assert bbox.y0 >= 1.1
-    assert bbox.width >= 1.3
+    assert bbox.height >= 0.25
 
 
 def test_render_result_keeps_automatic_bounds_when_custom_limits_are_disabled() -> None:
