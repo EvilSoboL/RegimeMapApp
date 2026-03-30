@@ -6,7 +6,7 @@ import numpy as np
 
 from ..diff_surface.exceptions import CancellationError as DiffSurfaceCancellationError
 from ..diff_surface.exceptions import DiffSurfaceError
-from ..diff_surface.models import DiffSurfaceJobConfig, LineFit, SurfaceMode
+from ..diff_surface.models import DiffSurfaceJobConfig, LineFit, MaximaDetectionMethod, SurfaceMode
 from ..diff_surface.pipeline import DiffSurfacePipeline
 from .cmaps import DEFAULT_CMAP_NAME, resolve_cmap_name
 from .exceptions import CancellationError, ProcessingError, ValidationError
@@ -37,7 +37,9 @@ class RegimeMapPipeline:
         if not base_validation.is_valid:
             return base_validation
 
-        diff_validation = self.diff_pipeline.validate_inputs(self._to_diff_config(config))
+        diff_validation = self.diff_pipeline.validate_inputs(
+            self._to_diff_config(config, include_analysis=self._needs_right_line_analysis(config))
+        )
         return ValidationResult(
             is_valid=diff_validation.is_valid,
             errors=tuple(diff_validation.errors),
@@ -60,6 +62,8 @@ class RegimeMapPipeline:
         colorbar_label = config.colorbar_label.strip() or default_component_label
         show_right_line = config.is_co_component and config.show_right_line
         show_mean_line = config.show_mean_line
+        needs_right_line = self._needs_right_line_analysis(config)
+        needs_min_line = config.show_min_line or needs_right_line
         x_limits = (float(config.x_min), float(config.x_max)) if config.use_custom_x_limits else None
         y_limits = (float(config.y_min), float(config.y_max)) if config.use_custom_y_limits else None
         co_levels = self.resolve_co_levels(config)
@@ -69,17 +73,17 @@ class RegimeMapPipeline:
         minima_line_fit = self._placeholder_line_fit()
         right_line_fit = self._placeholder_line_fit()
         mean_line_fit = self._placeholder_line_fit()
+        maxima_detection_method = MaximaDetectionMethod.ROW_PEAKS
+        analysis_contour_indices: tuple[int, ...] = ()
+        analysis_contour_values: tuple[float, ...] = ()
 
         if config.show_right_line and not config.is_co_component:
             self._emit_log(on_log, "Правая линия максимумов скрыта, потому что флаг CO снят.")
 
-        needs_right_line = show_right_line or show_mean_line
-        needs_min_line = config.show_min_line or needs_right_line
-
         try:
             if needs_right_line:
                 diff_result = self.diff_pipeline.process_job(
-                    self._to_diff_config(config),
+                    self._to_diff_config(config, include_analysis=True),
                     on_log=None,
                     on_progress=on_progress,
                     should_cancel=should_cancel,
@@ -90,6 +94,9 @@ class RegimeMapPipeline:
                 component_grid = np.asarray(diff_result.component_grid, dtype=float)
                 minima_line_fit = diff_result.minima_line_fit
                 right_line_fit = diff_result.right_line_fit
+                maxima_detection_method = diff_result.maxima_detection_method
+                analysis_contour_indices = diff_result.analysis_contour_indices
+                analysis_contour_values = diff_result.analysis_contour_values
                 if show_mean_line:
                     mean_line_fit = self.compute_mean_line(minima_line_fit, right_line_fit)
             else:
@@ -127,6 +134,9 @@ class RegimeMapPipeline:
             y_axis_label=y_axis_label,
             colorbar_label=colorbar_label,
             cmap_name=cmap_name,
+            maxima_detection_method=maxima_detection_method,
+            analysis_contour_indices=analysis_contour_indices,
+            analysis_contour_values=analysis_contour_values,
             font_family=DEFAULT_FONT_FAMILY,
             font_size=int(config.font_size),
         )
@@ -177,10 +187,22 @@ class RegimeMapPipeline:
     def _placeholder_line_fit(self) -> LineFit:
         return LineFit(slope=0.0, intercept=0.0)
 
-    def _to_diff_config(self, config: RegimeMapJobConfig) -> DiffSurfaceJobConfig:
+    def _needs_right_line_analysis(self, config: RegimeMapJobConfig) -> bool:
+        return (config.is_co_component and config.show_right_line) or config.show_mean_line
+
+    def _to_diff_config(
+        self,
+        config: RegimeMapJobConfig,
+        *,
+        include_analysis: bool,
+    ) -> DiffSurfaceJobConfig:
+        maxima_detection_method = config.maxima_detection_method if include_analysis else MaximaDetectionMethod.ROW_PEAKS
+        contour_levels_text = config.contour_levels_text if include_analysis else ""
         return DiffSurfaceJobConfig(
             input_path=config.input_path,
             surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
+            maxima_detection_method=maxima_detection_method,
+            contour_levels_text=contour_levels_text,
         )
 
     def _emit_log(self, callback: LogCallback | None, message: str) -> None:

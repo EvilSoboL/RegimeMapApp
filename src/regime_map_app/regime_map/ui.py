@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..diff_surface.models import DEFAULT_ANALYSIS_CONTOUR_LEVELS, MaximaDetectionMethod
+from ..diff_surface.validation import parse_contour_level_indices
 from .cmaps import AVAILABLE_CMAP_NAMES, CMAP_REFERENCE_URL, DEFAULT_CMAP_NAME, resolve_cmap_name
 from .exceptions import RegimeMapError
 from .models import (
@@ -109,6 +111,16 @@ class RegimeMapModuleWidget(QWidget):
         self.show_min_line_checkbox = QCheckBox("Наносить")
         self.show_right_line_checkbox = QCheckBox("Наносить")
         self.show_mean_line_checkbox = QCheckBox("Наносить")
+        self.maxima_detection_combo = QComboBox()
+        for method in MaximaDetectionMethod:
+            self.maxima_detection_combo.addItem(method.label, method)
+        self.contour_levels_edit = QLineEdit(DEFAULT_ANALYSIS_CONTOUR_LEVELS)
+        self.contour_levels_edit.setPlaceholderText("Например: 3, 4")
+        self.decrease_contour_levels_button = QPushButton("-1")
+        self.decrease_contour_levels_button.setToolTip("Уменьшить все номера линий уровня на 1")
+        self.increase_contour_levels_button = QPushButton("+1")
+        self.increase_contour_levels_button.setToolTip("Увеличить все номера линий уровня на 1")
+        self.contour_levels_widget = self._build_contour_levels_widget()
 
         self.x_axis_label_edit = QLineEdit(DEFAULT_X_AXIS_LABEL)
         self.y_axis_label_edit = QLineEdit(DEFAULT_Y_AXIS_LABEL)
@@ -140,6 +152,8 @@ class RegimeMapModuleWidget(QWidget):
         layout.addRow("Линия минимума:", self.show_min_line_checkbox)
         layout.addRow("Правая линия максимумов:", self.show_right_line_checkbox)
         layout.addRow("Средняя линия:", self.show_mean_line_checkbox)
+        layout.addRow("Поиск максимумов:", self.maxima_detection_combo)
+        layout.addRow("Уровни контура:", self.contour_levels_widget)
         layout.addRow("Подпись оси X:", self.x_axis_label_edit)
         layout.addRow("Подпись оси Y:", self.y_axis_label_edit)
         layout.addRow("Подпись шкалы:", self.colorbar_label_edit)
@@ -222,6 +236,15 @@ class RegimeMapModuleWidget(QWidget):
         layout.addWidget(self.cmap_help_button)
         return widget
 
+    def _build_contour_levels_widget(self) -> QWidget:
+        widget = QWidget(self)
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.contour_levels_edit, 1)
+        layout.addWidget(self.decrease_contour_levels_button)
+        layout.addWidget(self.increase_contour_levels_button)
+        return widget
+
     def _build_range_widget(self, checkbox: QCheckBox, lower_spin: QDoubleSpinBox, upper_spin: QDoubleSpinBox) -> QWidget:
         widget = QWidget(self)
         layout = QHBoxLayout(widget)
@@ -246,6 +269,12 @@ class RegimeMapModuleWidget(QWidget):
         layout.addWidget(self.ppm_step_spin)
         return widget
 
+    def current_maxima_detection_method(self) -> MaximaDetectionMethod:
+        method = self.maxima_detection_combo.currentData()
+        if isinstance(method, MaximaDetectionMethod):
+            return method
+        return MaximaDetectionMethod(method)
+
     def _wire_signals(self) -> None:
         self.select_input_button.clicked.connect(self._choose_input)
         self.validate_button.clicked.connect(self.validate_data)
@@ -256,6 +285,10 @@ class RegimeMapModuleWidget(QWidget):
         self.show_min_line_checkbox.toggled.connect(self._on_parameters_changed)
         self.show_right_line_checkbox.toggled.connect(self._on_parameters_changed)
         self.show_mean_line_checkbox.toggled.connect(self._on_parameters_changed)
+        self.maxima_detection_combo.currentIndexChanged.connect(self._on_parameters_changed)
+        self.contour_levels_edit.textChanged.connect(self._on_parameters_changed)
+        self.decrease_contour_levels_button.clicked.connect(lambda: self._shift_contour_levels(-1))
+        self.increase_contour_levels_button.clicked.connect(lambda: self._shift_contour_levels(1))
         self.use_custom_x_limits_checkbox.toggled.connect(self._on_parameters_changed)
         self.use_custom_y_limits_checkbox.toggled.connect(self._on_parameters_changed)
         self.use_custom_ppm_scale_checkbox.toggled.connect(self._on_parameters_changed)
@@ -296,6 +329,8 @@ class RegimeMapModuleWidget(QWidget):
             y_axis_label=self.y_axis_label_edit.text(),
             colorbar_label=self.colorbar_label_edit.text(),
             cmap_name=self.cmap_combo.currentText(),
+            maxima_detection_method=self.current_maxima_detection_method(),
+            contour_levels_text=self.contour_levels_edit.text(),
             font_size=self.font_size_spin.value(),
         )
 
@@ -358,6 +393,10 @@ class RegimeMapModuleWidget(QWidget):
         self.log_edit.clear()
         self.append_log(f"Файл: {input_path.name}")
         self.append_log(f"Линии: {self._format_line_list(config)}")
+        if config.show_right_line or config.show_mean_line:
+            self.append_log(f"Метод поиска максимумов: {config.maxima_detection_method.label}")
+            if config.maxima_detection_method.uses_contour_levels:
+                self.append_log(f"Номера линий уровня: {config.contour_levels_text}")
         self.append_log(f"Подпись X: {config.x_axis_label.strip() or DEFAULT_X_AXIS_LABEL}")
         self.append_log(f"Подпись Y: {config.y_axis_label.strip() or DEFAULT_Y_AXIS_LABEL}")
         self.append_log(f"Подпись шкалы: {config.colorbar_label.strip() or CO_COMPONENT_LABEL}")
@@ -439,6 +478,12 @@ class RegimeMapModuleWidget(QWidget):
     def _on_completed(self, result: RegimeMapResult) -> None:
         self._last_result = result
         render_result(self.figure, result)
+        if result.analysis_contour_indices:
+            contour_details = ", ".join(
+                f"№{index} ({value:.6g})"
+                for index, value in zip(result.analysis_contour_indices, result.analysis_contour_values)
+            )
+            self.append_log(f"Использованы линии уровня: {contour_details}.")
         if result.show_min_line:
             self.append_log(
                 f"Построение завершено. Линия минимальной концентрации: a={result.minima_line_fit.slope:.6g}, b={result.minima_line_fit.intercept:.6g}."
@@ -464,6 +509,22 @@ class RegimeMapModuleWidget(QWidget):
         self._refresh_parameter_controls()
         self.refresh_form_state()
 
+    def _shift_contour_levels(self, delta: int) -> None:
+        try:
+            current_indices = parse_contour_level_indices(self.contour_levels_edit.text())
+        except ValueError:
+            current_indices = parse_contour_level_indices(DEFAULT_ANALYSIS_CONTOUR_LEVELS)
+
+        shifted_indices: list[int] = []
+        seen: set[int] = set()
+        for index in current_indices:
+            shifted_value = max(1, index + delta)
+            if shifted_value not in seen:
+                shifted_indices.append(shifted_value)
+                seen.add(shifted_value)
+
+        self.contour_levels_edit.setText(", ".join(str(index) for index in shifted_indices))
+
     def _normalize_cmap_text(self) -> None:
         resolved_name = resolve_cmap_name(self.cmap_combo.currentText())
         if resolved_name is not None and resolved_name != self.cmap_combo.currentText():
@@ -473,6 +534,12 @@ class RegimeMapModuleWidget(QWidget):
         x_enabled = self.use_custom_x_limits_checkbox.isChecked() and not self._busy
         y_enabled = self.use_custom_y_limits_checkbox.isChecked() and not self._busy
         ppm_enabled = self.use_custom_ppm_scale_checkbox.isChecked() and not self._busy
+        right_line_analysis_enabled = (
+            self.show_right_line_checkbox.isChecked() or self.show_mean_line_checkbox.isChecked()
+        ) and not self._busy
+        contour_levels_enabled = (
+            right_line_analysis_enabled and self.current_maxima_detection_method().uses_contour_levels
+        )
 
         self.x_min_spin.setEnabled(x_enabled)
         self.x_max_spin.setEnabled(x_enabled)
@@ -491,6 +558,10 @@ class RegimeMapModuleWidget(QWidget):
         self.y_axis_label_edit.setEnabled(not self._busy)
         self.colorbar_label_edit.setEnabled(not self._busy)
         self.cmap_combo.setEnabled(not self._busy)
+        self.maxima_detection_combo.setEnabled(right_line_analysis_enabled)
+        self.contour_levels_edit.setEnabled(contour_levels_enabled)
+        self.decrease_contour_levels_button.setEnabled(contour_levels_enabled)
+        self.increase_contour_levels_button.setEnabled(contour_levels_enabled)
         self.font_size_spin.setEnabled(not self._busy)
 
     def _show_cmap_help(self) -> None:

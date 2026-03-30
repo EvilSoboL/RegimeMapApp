@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..diff_surface.validation import parse_contour_level_indices
 from .cmaps import resolve_cmap_name
 from .models import RegimeMapJobConfig, ValidationResult
 
@@ -38,6 +39,13 @@ def validate_job_config(config: RegimeMapJobConfig) -> ValidationResult:
 
     if resolve_cmap_name(config.cmap_name) is None:
         errors.append(f"Цветовая карта {config.cmap_name!r} не поддерживается Matplotlib.")
+
+    needs_diff_analysis = config.show_right_line or config.show_mean_line
+    if needs_diff_analysis and config.maxima_detection_method.uses_contour_levels:
+        try:
+            parse_contour_level_indices(config.contour_levels_text)
+        except ValueError as exc:
+            errors.append(str(exc))
 
     return ValidationResult(is_valid=not errors, errors=tuple(errors))
 

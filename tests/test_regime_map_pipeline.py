@@ -17,9 +17,11 @@ DEFAULT_CMAP_NAME = regime_cmaps_module.DEFAULT_CMAP_NAME
 GENERIC_COMPONENT_LABEL = regime_models.GENERIC_COMPONENT_LABEL
 RegimeMapJobConfig = regime_models.RegimeMapJobConfig
 RegimeMapPipeline = regime_pipeline_module.RegimeMapPipeline
-LineFit = diff_models.LineFit
+DEFAULT_ANALYSIS_CONTOUR_LEVELS = diff_models.DEFAULT_ANALYSIS_CONTOUR_LEVELS
 DifferentialSurfaceResult = diff_models.DifferentialSurfaceResult
 DiffSurfaceValidationResult = diff_models.ValidationResult
+LineFit = diff_models.LineFit
+MaximaDetectionMethod = diff_models.MaximaDetectionMethod
 SurfaceMode = diff_models.SurfaceMode
 
 
@@ -74,9 +76,11 @@ class StubDiffPipeline:
 
 class NoLineStubDiffPipeline:
     def __init__(self) -> None:
+        self.validated_config = None
         self.process_job_called = False
 
-    def validate_inputs(self, _config):
+    def validate_inputs(self, config):
+        self.validated_config = config
         return DiffSurfaceValidationResult(is_valid=True, errors=(), checked_points=16)
 
     def read_dataset(self, _path):
@@ -94,7 +98,13 @@ class NoLineStubDiffPipeline:
         raise AssertionError(f"process_job must not be called when all line checkboxes are disabled: {config}")
 
 
-def _build_diff_result(input_path: Path) -> DifferentialSurfaceResult:
+def _build_diff_result(
+    input_path: Path,
+    *,
+    maxima_detection_method: MaximaDetectionMethod = MaximaDetectionMethod.ROW_PEAKS,
+    analysis_contour_indices: tuple[int, ...] = (),
+    analysis_contour_values: tuple[float, ...] = (),
+) -> DifferentialSurfaceResult:
     return DifferentialSurfaceResult(
         input_path=input_path,
         surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
@@ -110,6 +120,9 @@ def _build_diff_result(input_path: Path) -> DifferentialSurfaceResult:
         right_maxima_points=np.array([[1.0, 0.8], [2.0, 0.6]]),
         left_line_fit=LineFit(slope=1.1, intercept=0.0),
         right_line_fit=LineFit(slope=-0.2, intercept=1.0),
+        maxima_detection_method=maxima_detection_method,
+        analysis_contour_indices=analysis_contour_indices,
+        analysis_contour_values=analysis_contour_values,
     )
 
 
@@ -121,6 +134,25 @@ def test_validate_inputs_reuses_diff_surface_csv_rules(tmp_path: Path) -> None:
 
     assert not validation.is_valid
     assert any("разделитель" in error.lower() for error in validation.errors)
+
+
+def test_validate_inputs_ignores_contour_settings_without_right_line_analysis(tmp_path: Path) -> None:
+    input_file = tmp_path / "surface.csv"
+    _write_success_surface_csv(input_file)
+    stub_diff_pipeline = NoLineStubDiffPipeline()
+    pipeline = RegimeMapPipeline(diff_pipeline=stub_diff_pipeline)
+
+    validation = pipeline.validate_inputs(
+        RegimeMapJobConfig(
+            input_path=input_file,
+            maxima_detection_method=MaximaDetectionMethod.CONTOUR_LEVELS,
+            contour_levels_text="0, bad",
+        )
+    )
+
+    assert validation.is_valid
+    assert stub_diff_pipeline.validated_config.maxima_detection_method is MaximaDetectionMethod.ROW_PEAKS
+    assert stub_diff_pipeline.validated_config.contour_levels_text == ""
 
 
 def test_process_job_uses_diff_surface_result_with_auto_ranges_and_non_co_overlay_rules(tmp_path: Path) -> None:
@@ -164,6 +196,8 @@ def test_process_job_builds_map_without_line_calculations_when_checkboxes_are_di
             show_min_line=False,
             show_right_line=False,
             show_mean_line=False,
+            maxima_detection_method=MaximaDetectionMethod.CONTOUR_LEVELS,
+            contour_levels_text="3, 4",
         )
     )
 
@@ -172,12 +206,20 @@ def test_process_job_builds_map_without_line_calculations_when_checkboxes_are_di
     assert result.show_right_line is False
     assert result.show_mean_line is False
     assert np.array_equal(result.fuel_axis, np.array([0.0, 1.0, 2.0]))
+    assert result.analysis_contour_indices == ()
 
 
-def test_process_job_supports_custom_ranges_and_ppm_scale(tmp_path: Path) -> None:
+def test_process_job_supports_custom_ranges_ppm_scale_and_contour_based_right_line(tmp_path: Path) -> None:
     input_file = tmp_path / "surface.csv"
     _write_success_surface_csv(input_file)
-    stub_diff_pipeline = StubDiffPipeline(_build_diff_result(input_file))
+    stub_diff_pipeline = StubDiffPipeline(
+        _build_diff_result(
+            input_file,
+            maxima_detection_method=MaximaDetectionMethod.CONTOUR_LEVELS,
+            analysis_contour_indices=(3, 4),
+            analysis_contour_values=(0.25, 0.5),
+        )
+    )
     pipeline = RegimeMapPipeline(diff_pipeline=stub_diff_pipeline)
 
     result = pipeline.process_job(
@@ -201,10 +243,14 @@ def test_process_job_supports_custom_ranges_and_ppm_scale(tmp_path: Path) -> Non
             y_axis_label="Steam flow",
             colorbar_label="CO concentration",
             cmap_name="Plasma",
+            maxima_detection_method=MaximaDetectionMethod.CONTOUR_LEVELS,
+            contour_levels_text="3, 4",
             font_size=16,
         )
     )
 
+    assert stub_diff_pipeline.processed_config.maxima_detection_method is MaximaDetectionMethod.CONTOUR_LEVELS
+    assert stub_diff_pipeline.processed_config.contour_levels_text == "3, 4"
     assert result.component_label == CO_COMPONENT_LABEL
     assert np.array_equal(result.co_levels, np.arange(0.0, 201.0, 25.0))
     assert result.x_limits == pytest.approx((0.7, 1.3))
@@ -215,6 +261,9 @@ def test_process_job_supports_custom_ranges_and_ppm_scale(tmp_path: Path) -> Non
     assert result.y_axis_label == "Steam flow"
     assert result.colorbar_label == "CO concentration"
     assert result.cmap_name == "plasma"
+    assert result.maxima_detection_method is MaximaDetectionMethod.CONTOUR_LEVELS
+    assert result.analysis_contour_indices == (3, 4)
+    assert result.analysis_contour_values == pytest.approx((0.25, 0.5))
     assert result.font_size == 16
 
 
