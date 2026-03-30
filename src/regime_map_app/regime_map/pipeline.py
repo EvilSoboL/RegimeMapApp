@@ -56,42 +56,62 @@ class RegimeMapPipeline:
         if not validation.is_valid:
             raise ValidationError("\n".join(validation.errors))
 
-        try:
-            diff_result = self.diff_pipeline.process_job(
-                self._to_diff_config(config),
-                on_log=on_log,
-                on_progress=on_progress,
-                should_cancel=should_cancel,
-            )
-        except DiffSurfaceCancellationError as exc:
-            raise CancellationError(str(exc)) from exc
-        except DiffSurfaceError as exc:
-            raise ProcessingError(str(exc)) from exc
-
-        mean_line_fit = self.compute_mean_line(diff_result.minima_line_fit, diff_result.right_line_fit)
         default_component_label = CO_COMPONENT_LABEL if config.is_co_component else GENERIC_COMPONENT_LABEL
         colorbar_label = config.colorbar_label.strip() or default_component_label
         show_right_line = config.is_co_component and config.show_right_line
+        show_mean_line = config.show_mean_line
         x_limits = (float(config.x_min), float(config.x_max)) if config.use_custom_x_limits else None
         y_limits = (float(config.y_min), float(config.y_max)) if config.use_custom_y_limits else None
         co_levels = self.resolve_co_levels(config)
         cmap_name = resolve_cmap_name(config.cmap_name) or DEFAULT_CMAP_NAME
         x_axis_label = config.x_axis_label.strip() or DEFAULT_X_AXIS_LABEL
         y_axis_label = config.y_axis_label.strip() or DEFAULT_Y_AXIS_LABEL
+        minima_line_fit = self._placeholder_line_fit()
+        right_line_fit = self._placeholder_line_fit()
+        mean_line_fit = self._placeholder_line_fit()
 
         if config.show_right_line and not config.is_co_component:
-            self._emit_log(on_log, "Правая линия максимумов скрыта, потому что флажок CO снят.")
+            self._emit_log(on_log, "Правая линия максимумов скрыта, потому что флаг CO снят.")
 
-        self._emit_log(
-            on_log,
-            f"Средняя линия: additive = {mean_line_fit.slope:.6g} * fuel + {mean_line_fit.intercept:.6g}",
-        )
+        needs_right_line = show_right_line or show_mean_line
+        needs_min_line = config.show_min_line or needs_right_line
+
+        try:
+            if needs_right_line:
+                diff_result = self.diff_pipeline.process_job(
+                    self._to_diff_config(config),
+                    on_log=None,
+                    on_progress=on_progress,
+                    should_cancel=should_cancel,
+                )
+                input_path = diff_result.input_path
+                fuel_axis = np.asarray(diff_result.fuel_axis, dtype=float)
+                additive_axis = np.asarray(diff_result.additive_axis, dtype=float)
+                component_grid = np.asarray(diff_result.component_grid, dtype=float)
+                minima_line_fit = diff_result.minima_line_fit
+                right_line_fit = diff_result.right_line_fit
+                if show_mean_line:
+                    mean_line_fit = self.compute_mean_line(minima_line_fit, right_line_fit)
+            else:
+                input_path, fuel_axis, additive_axis, component_grid = self._build_base_map(
+                    config,
+                    on_progress=on_progress,
+                    should_cancel=should_cancel,
+                )
+                if needs_min_line:
+                    minima_points = self.diff_pipeline.find_minima_points(component_grid, fuel_axis, additive_axis)
+                    minima_line_fit = self.diff_pipeline.fit_line(minima_points, "линии минимумов концентрации")
+                self._emit_progress(on_progress, 100)
+        except DiffSurfaceCancellationError as exc:
+            raise CancellationError(str(exc)) from exc
+        except DiffSurfaceError as exc:
+            raise ProcessingError(str(exc)) from exc
 
         return RegimeMapResult(
-            input_path=diff_result.input_path,
-            fuel_axis=np.asarray(diff_result.fuel_axis, dtype=float),
-            additive_axis=np.asarray(diff_result.additive_axis, dtype=float),
-            component_grid=np.asarray(diff_result.component_grid, dtype=float),
+            input_path=input_path,
+            fuel_axis=fuel_axis,
+            additive_axis=additive_axis,
+            component_grid=component_grid,
             component_label=default_component_label,
             co_levels=co_levels,
             x_limits=x_limits,
@@ -99,9 +119,9 @@ class RegimeMapPipeline:
             is_co_component=config.is_co_component,
             show_min_line=config.show_min_line,
             show_right_line=show_right_line,
-            show_mean_line=config.show_mean_line,
-            minima_line_fit=diff_result.minima_line_fit,
-            right_line_fit=diff_result.right_line_fit,
+            show_mean_line=show_mean_line,
+            minima_line_fit=minima_line_fit,
+            right_line_fit=right_line_fit,
             mean_line_fit=mean_line_fit,
             x_axis_label=x_axis_label,
             y_axis_label=y_axis_label,
@@ -129,6 +149,34 @@ class RegimeMapPipeline:
             raise ProcessingError("Не удалось сформировать пользовательскую шкалу ppm.")
         return unique_values
 
+    def _build_base_map(
+        self,
+        config: RegimeMapJobConfig,
+        *,
+        on_progress: ProgressCallback | None = None,
+        should_cancel: CancelCallback | None = None,
+    ) -> tuple[object, np.ndarray, np.ndarray, np.ndarray]:
+        input_path = config.input_path
+        assert input_path is not None
+
+        self._check_cancel(should_cancel)
+        frame = self.diff_pipeline.read_dataset(input_path)
+        self._emit_progress(on_progress, 40)
+
+        self._check_cancel(should_cancel)
+        fuel_axis, additive_axis, component_grid = self.diff_pipeline.build_regular_grid(frame)
+        self._emit_progress(on_progress, 80)
+
+        return (
+            input_path,
+            np.asarray(fuel_axis, dtype=float),
+            np.asarray(additive_axis, dtype=float),
+            np.asarray(component_grid, dtype=float),
+        )
+
+    def _placeholder_line_fit(self) -> LineFit:
+        return LineFit(slope=0.0, intercept=0.0)
+
     def _to_diff_config(self, config: RegimeMapJobConfig) -> DiffSurfaceJobConfig:
         return DiffSurfaceJobConfig(
             input_path=config.input_path,
@@ -138,3 +186,11 @@ class RegimeMapPipeline:
     def _emit_log(self, callback: LogCallback | None, message: str) -> None:
         if callback is not None:
             callback(message)
+
+    def _emit_progress(self, callback: ProgressCallback | None, value: int) -> None:
+        if callback is not None:
+            callback(value)
+
+    def _check_cancel(self, should_cancel: CancelCallback | None) -> None:
+        if should_cancel is not None and should_cancel():
+            raise CancellationError("Построение режимной карты остановлено пользователем.")

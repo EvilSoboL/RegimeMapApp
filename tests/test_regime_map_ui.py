@@ -51,9 +51,9 @@ def test_regime_map_defaults_use_auto_ranges_and_enabled_line_options(qtbot) -> 
     widget = RegimeMapModuleWidget()
     qtbot.addWidget(widget)
 
-    assert widget.show_min_line_checkbox.isChecked()
-    assert widget.show_right_line_checkbox.isChecked()
-    assert widget.show_mean_line_checkbox.isChecked()
+    assert not widget.show_min_line_checkbox.isChecked()
+    assert not widget.show_right_line_checkbox.isChecked()
+    assert not widget.show_mean_line_checkbox.isChecked()
     assert widget.x_axis_label_edit.text() == "Расход топлива, кг/ч"
     assert widget.y_axis_label_edit.text() == "Расход пара, кг/ч"
     assert widget.colorbar_label_edit.text() == "CO, ppm"

@@ -107,11 +107,8 @@ class RegimeMapModuleWidget(QWidget):
         layout = QFormLayout(group)
 
         self.show_min_line_checkbox = QCheckBox("Наносить")
-        self.show_min_line_checkbox.setChecked(True)
         self.show_right_line_checkbox = QCheckBox("Наносить")
-        self.show_right_line_checkbox.setChecked(True)
         self.show_mean_line_checkbox = QCheckBox("Наносить")
-        self.show_mean_line_checkbox.setChecked(True)
 
         self.x_axis_label_edit = QLineEdit(DEFAULT_X_AXIS_LABEL)
         self.y_axis_label_edit = QLineEdit(DEFAULT_Y_AXIS_LABEL)

@@ -61,9 +61,37 @@ class StubDiffPipeline:
         self.validated_config = config
         return DiffSurfaceValidationResult(is_valid=True, errors=(), checked_points=16)
 
+    def read_dataset(self, _path):
+        return object()
+
+    def build_regular_grid(self, _frame):
+        return self.result.fuel_axis, self.result.additive_axis, self.result.component_grid
+
     def process_job(self, config, **_kwargs):
         self.processed_config = config
         return self.result
+
+
+class NoLineStubDiffPipeline:
+    def __init__(self) -> None:
+        self.process_job_called = False
+
+    def validate_inputs(self, _config):
+        return DiffSurfaceValidationResult(is_valid=True, errors=(), checked_points=16)
+
+    def read_dataset(self, _path):
+        return object()
+
+    def build_regular_grid(self, _frame):
+        return (
+            np.array([0.0, 1.0, 2.0]),
+            np.array([0.0, 1.0, 2.0]),
+            np.array([[0.0, 10.0, 20.0], [5.0, 0.0, 25.0], [10.0, 5.0, 0.0]], dtype=float),
+        )
+
+    def process_job(self, config, **_kwargs):
+        self.process_job_called = True
+        raise AssertionError(f"process_job must not be called when all line checkboxes are disabled: {config}")
 
 
 def _build_diff_result(input_path: Path) -> DifferentialSurfaceResult:
@@ -122,6 +150,28 @@ def test_process_job_uses_diff_surface_result_with_auto_ranges_and_non_co_overla
     assert result.show_mean_line is True
     assert result.mean_line_fit.slope == pytest.approx(0.4)
     assert result.mean_line_fit.intercept == pytest.approx(0.55)
+
+
+def test_process_job_builds_map_without_line_calculations_when_checkboxes_are_disabled(tmp_path: Path) -> None:
+    input_file = tmp_path / "surface.csv"
+    _write_success_surface_csv(input_file)
+    stub_diff_pipeline = NoLineStubDiffPipeline()
+    pipeline = RegimeMapPipeline(diff_pipeline=stub_diff_pipeline)
+
+    result = pipeline.process_job(
+        RegimeMapJobConfig(
+            input_path=input_file,
+            show_min_line=False,
+            show_right_line=False,
+            show_mean_line=False,
+        )
+    )
+
+    assert stub_diff_pipeline.process_job_called is False
+    assert result.show_min_line is False
+    assert result.show_right_line is False
+    assert result.show_mean_line is False
+    assert np.array_equal(result.fuel_axis, np.array([0.0, 1.0, 2.0]))
 
 
 def test_process_job_supports_custom_ranges_and_ppm_scale(tmp_path: Path) -> None:

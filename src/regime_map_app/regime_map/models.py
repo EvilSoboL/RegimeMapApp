@@ -25,9 +25,9 @@ DEFAULT_FONT_SIZE = 12
 class RegimeMapJobConfig:
     input_path: Path | None
     is_co_component: bool = True
-    show_min_line: bool = True
-    show_right_line: bool = True
-    show_mean_line: bool = True
+    show_min_line: bool = False
+    show_right_line: bool = False
+    show_mean_line: bool = False
     use_custom_x_limits: bool = False
     x_min: float = DEFAULT_X_LIMITS[0]
     x_max: float = DEFAULT_X_LIMITS[1]
