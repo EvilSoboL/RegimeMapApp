@@ -145,6 +145,10 @@ def test_process_job_supports_custom_ranges_and_ppm_scale(tmp_path: Path) -> Non
             ppm_min=0.0,
             ppm_max=200.0,
             ppm_step=25.0,
+            x_axis_label="Fuel flow",
+            y_axis_label="Steam flow",
+            colorbar_label="CO concentration",
+            font_size=16,
         )
     )
 
@@ -154,3 +158,7 @@ def test_process_job_supports_custom_ranges_and_ppm_scale(tmp_path: Path) -> Non
     assert result.y_limits == pytest.approx((0.6, 1.0))
     assert result.show_right_line is True
     assert result.show_mean_line is False
+    assert result.x_axis_label == "Fuel flow"
+    assert result.y_axis_label == "Steam flow"
+    assert result.colorbar_label == "CO concentration"
+    assert result.font_size == 16

@@ -14,6 +14,7 @@ regime_visualization = import_module("regime_map_app.regime_map.visualization")
 diff_models = import_module("regime_map_app.diff_surface.models")
 
 CO_COMPONENT_LABEL = regime_models.CO_COMPONENT_LABEL
+DEFAULT_FONT_FAMILY = regime_models.DEFAULT_FONT_FAMILY
 GENERIC_COMPONENT_LABEL = regime_models.GENERIC_COMPONENT_LABEL
 RegimeMapResult = regime_models.RegimeMapResult
 LineFit = diff_models.LineFit
@@ -92,8 +93,10 @@ def test_render_result_draws_only_requested_lines_and_clips_to_custom_bounds() -
     render_result(figure, _build_custom_result(Path("surface.csv")))
 
     main_axis = figure.axes[0]
+    colorbar_axis = figure.axes[1]
     minima_line = main_axis.lines[0]
     mean_line = main_axis.lines[1]
+    legend = main_axis.get_legend()
 
     assert len(main_axis.lines) == 2
     assert np.allclose(minima_line.get_xdata(), np.array([0.7, 1.0]))
@@ -102,6 +105,16 @@ def test_render_result_draws_only_requested_lines_and_clips_to_custom_bounds() -
     assert np.allclose(mean_line.get_ydata(), np.array([0.8, 0.95]))
     assert main_axis.get_xlim() == pytest.approx((0.7, 1.3))
     assert main_axis.get_ylim() == pytest.approx((0.6, 1.0))
+    assert main_axis.get_xlabel() == "Расход топлива, кг/ч"
+    assert main_axis.get_ylabel() == "Расход пара, кг/ч"
+    assert colorbar_axis.get_ylabel() == "CO, ppm"
+    assert main_axis.xaxis.label.get_fontfamily() == [DEFAULT_FONT_FAMILY]
+    assert main_axis.yaxis.label.get_fontfamily() == [DEFAULT_FONT_FAMILY]
+    assert main_axis.title.get_fontfamily() == [DEFAULT_FONT_FAMILY]
+    assert colorbar_axis.yaxis.label.get_fontfamily() == [DEFAULT_FONT_FAMILY]
+    assert legend is not None
+    bbox = legend.get_bbox_to_anchor().transformed(main_axis.transAxes.inverted())
+    assert bbox.y0 >= 1.0
 
 
 def test_render_result_keeps_automatic_bounds_when_custom_limits_are_disabled() -> None:

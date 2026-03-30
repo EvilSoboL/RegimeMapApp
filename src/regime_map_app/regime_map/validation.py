@@ -32,6 +32,9 @@ def validate_job_config(config: RegimeMapJobConfig) -> ValidationResult:
         if config.ppm_step <= 0:
             errors.append("Шаг шкалы ppm должен быть положительным.")
 
+    if config.font_size <= 0:
+        errors.append("Размер шрифта должен быть положительным.")
+
     return ValidationResult(is_valid=not errors, errors=tuple(errors))
 
 

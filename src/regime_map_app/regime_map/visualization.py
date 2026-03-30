@@ -19,7 +19,15 @@ def render_placeholder(figure: Figure, message: str) -> None:
     figure.clear()
     axis = figure.add_subplot(111)
     axis.axis("off")
-    axis.text(0.5, 0.5, message, ha="center", va="center", fontsize=12)
+    axis.text(
+        0.5,
+        0.5,
+        message,
+        ha="center",
+        va="center",
+        fontsize=12,
+        fontfamily="Times New Roman",
+    )
     _draw_if_possible(figure)
 
 
@@ -50,9 +58,15 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
         result.component_grid,
         **contour_kwargs,
     )
-    colorbar = figure.colorbar(contour, ax=axis, label=result.component_label, extend=contour_extend)
+    colorbar = figure.colorbar(contour, ax=axis, extend=contour_extend)
+    colorbar.set_label(
+        result.colorbar_label,
+        fontfamily=result.font_family,
+        fontsize=result.font_size,
+    )
     if not isinstance(result.co_levels, int):
         colorbar.set_ticks(result.co_levels)
+    _apply_axis_tick_font(colorbar.ax, result.font_family, result.font_size)
 
     plot_x_limits = result.x_limits or (float(np.min(result.fuel_axis)), float(np.max(result.fuel_axis)))
     plot_y_limits = result.y_limits or (float(np.min(result.additive_axis)), float(np.max(result.additive_axis)))
@@ -91,17 +105,25 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
             label=_line_label("Средняя линия", result.mean_line_fit.slope, result.mean_line_fit.intercept),
         )
 
-    axis.set_xlabel("Расход топлива, кг/ч")
-    axis.set_ylabel("Расход пара, кг/ч")
+    axis.set_xlabel(result.x_axis_label, fontfamily=result.font_family, fontsize=result.font_size)
+    axis.set_ylabel(result.y_axis_label, fontfamily=result.font_family, fontsize=result.font_size)
     if result.x_limits is not None:
         axis.set_xlim(*result.x_limits)
     if result.y_limits is not None:
         axis.set_ylim(*result.y_limits)
-    axis.set_title(result.input_path.name)
+    axis.set_title(result.input_path.name, fontfamily=result.font_family, fontsize=result.font_size)
+    _apply_axis_tick_font(axis, result.font_family, result.font_size)
     handles, _labels = axis.get_legend_handles_labels()
     if handles:
-        axis.legend(loc="best")
-    figure.tight_layout()
+        axis.legend(
+            loc="lower left",
+            bbox_to_anchor=(0.0, 1.02, 1.0, 0.2),
+            mode="expand",
+            borderaxespad=0.0,
+            ncol=min(len(handles), 3),
+            prop={"family": result.font_family, "size": result.font_size},
+        )
+    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.88))
     _draw_if_possible(figure)
 
 
@@ -198,3 +220,9 @@ def _clip_line_to_bounds(
 def _draw_if_possible(figure: Figure) -> None:
     if figure.canvas is not None:
         figure.canvas.draw_idle()
+
+
+def _apply_axis_tick_font(axis, font_family: str, font_size: int) -> None:
+    for tick_label in axis.get_xticklabels() + axis.get_yticklabels():
+        tick_label.set_fontfamily(font_family)
+        tick_label.set_fontsize(font_size)

@@ -26,7 +26,10 @@ from .exceptions import RegimeMapError
 from .models import (
     CO_COMPONENT_LABEL,
     DEFAULT_CO_LEVELS,
+    DEFAULT_FONT_SIZE,
+    DEFAULT_X_AXIS_LABEL,
     DEFAULT_X_LIMITS,
+    DEFAULT_Y_AXIS_LABEL,
     DEFAULT_Y_LIMITS,
     RegimeMapJobConfig,
     RegimeMapResult,
@@ -95,15 +98,20 @@ class RegimeMapModuleWidget(QWidget):
         group = QGroupBox("Параметры")
         layout = QFormLayout(group)
 
-        self.co_checkbox = QCheckBox("Использовать CO")
-        self.co_checkbox.setChecked(True)
-
         self.show_min_line_checkbox = QCheckBox("Наносить")
         self.show_min_line_checkbox.setChecked(True)
         self.show_right_line_checkbox = QCheckBox("Наносить")
         self.show_right_line_checkbox.setChecked(True)
         self.show_mean_line_checkbox = QCheckBox("Наносить")
         self.show_mean_line_checkbox.setChecked(True)
+
+        self.x_axis_label_edit = QLineEdit(DEFAULT_X_AXIS_LABEL)
+        self.y_axis_label_edit = QLineEdit(DEFAULT_Y_AXIS_LABEL)
+        self.colorbar_label_edit = QLineEdit(CO_COMPONENT_LABEL)
+
+        self.font_size_spin = self._build_int_spin(8, 36, DEFAULT_FONT_SIZE)
+        self.font_size_spin.setSingleStep(1)
+        self.font_size_spin.setSuffix(" pt")
 
         self.use_custom_x_limits_checkbox = QCheckBox("Задать")
         self.x_min_spin = self._build_float_spin(*DEFAULT_X_LIMITS)
@@ -121,10 +129,13 @@ class RegimeMapModuleWidget(QWidget):
         self.ppm_step_spin = self._build_int_spin(1, 10_000, int(DEFAULT_CO_LEVELS[1] - DEFAULT_CO_LEVELS[0]))
         self.ppm_scale_widget = self._build_ppm_widget()
 
-        layout.addRow("CO:", self.co_checkbox)
         layout.addRow("Линия минимума:", self.show_min_line_checkbox)
         layout.addRow("Правая линия максимумов:", self.show_right_line_checkbox)
         layout.addRow("Средняя линия:", self.show_mean_line_checkbox)
+        layout.addRow("Подпись оси X:", self.x_axis_label_edit)
+        layout.addRow("Подпись оси Y:", self.y_axis_label_edit)
+        layout.addRow("Подпись шкалы:", self.colorbar_label_edit)
+        layout.addRow("Размер шрифта:", self.font_size_spin)
         layout.addRow("Границы X:", self.x_limits_widget)
         layout.addRow("Границы Y:", self.y_limits_widget)
         layout.addRow("Шкала ppm:", self.ppm_scale_widget)
@@ -203,7 +214,6 @@ class RegimeMapModuleWidget(QWidget):
         self.run_button.clicked.connect(self.start_processing)
         self.save_button.clicked.connect(self.save_results)
 
-        self.co_checkbox.toggled.connect(self._on_parameters_changed)
         self.show_min_line_checkbox.toggled.connect(self._on_parameters_changed)
         self.show_right_line_checkbox.toggled.connect(self._on_parameters_changed)
         self.show_mean_line_checkbox.toggled.connect(self._on_parameters_changed)
@@ -211,6 +221,10 @@ class RegimeMapModuleWidget(QWidget):
         self.use_custom_y_limits_checkbox.toggled.connect(self._on_parameters_changed)
         self.use_custom_ppm_scale_checkbox.toggled.connect(self._on_parameters_changed)
 
+        self.x_axis_label_edit.textChanged.connect(self._on_parameters_changed)
+        self.y_axis_label_edit.textChanged.connect(self._on_parameters_changed)
+        self.colorbar_label_edit.textChanged.connect(self._on_parameters_changed)
+        self.font_size_spin.valueChanged.connect(self._on_parameters_changed)
         self.x_min_spin.valueChanged.connect(self._on_parameters_changed)
         self.x_max_spin.valueChanged.connect(self._on_parameters_changed)
         self.y_min_spin.valueChanged.connect(self._on_parameters_changed)
@@ -222,7 +236,7 @@ class RegimeMapModuleWidget(QWidget):
     def collect_config(self) -> RegimeMapJobConfig:
         return RegimeMapJobConfig(
             input_path=self._selected_input_path,
-            is_co_component=self.co_checkbox.isChecked(),
+            is_co_component=True,
             show_min_line=self.show_min_line_checkbox.isChecked(),
             show_right_line=self.show_right_line_checkbox.isChecked(),
             show_mean_line=self.show_mean_line_checkbox.isChecked(),
@@ -236,6 +250,10 @@ class RegimeMapModuleWidget(QWidget):
             ppm_min=float(self.ppm_min_spin.value()),
             ppm_max=float(self.ppm_max_spin.value()),
             ppm_step=float(self.ppm_step_spin.value()),
+            x_axis_label=self.x_axis_label_edit.text(),
+            y_axis_label=self.y_axis_label_edit.text(),
+            colorbar_label=self.colorbar_label_edit.text(),
+            font_size=self.font_size_spin.value(),
         )
 
     def refresh_form_state(self) -> None:
@@ -296,8 +314,11 @@ class RegimeMapModuleWidget(QWidget):
         self._last_result = None
         self.log_edit.clear()
         self.append_log(f"Файл: {input_path.name}")
-        self.append_log(f"CO: {'да' if config.is_co_component else 'нет'}")
         self.append_log(f"Линии: {self._format_line_list(config)}")
+        self.append_log(f"Подпись X: {config.x_axis_label.strip() or DEFAULT_X_AXIS_LABEL}")
+        self.append_log(f"Подпись Y: {config.y_axis_label.strip() or DEFAULT_Y_AXIS_LABEL}")
+        self.append_log(f"Подпись шкалы: {config.colorbar_label.strip() or CO_COMPONENT_LABEL}")
+        self.append_log(f"Размер шрифта: {config.font_size} pt")
         self.append_log(f"Границы X: {self._format_range(config.use_custom_x_limits, config.x_min, config.x_max)}")
         self.append_log(f"Границы Y: {self._format_range(config.use_custom_y_limits, config.y_min, config.y_max)}")
         self.append_log(f"Шкала ppm: {self._format_ppm_scale(config)}")
@@ -382,8 +403,6 @@ class RegimeMapModuleWidget(QWidget):
             self.append_log(
                 f"Правая линия максимумов: a={result.right_line_fit.slope:.6g}, b={result.right_line_fit.intercept:.6g}."
             )
-        elif not result.is_co_component:
-            self.append_log("Правая линия максимумов не нанесена, потому что флажок CO снят.")
         if result.show_mean_line:
             self.append_log(
                 f"Средняя линия: a={result.mean_line_fit.slope:.6g}, b={result.mean_line_fit.intercept:.6g}."
@@ -405,7 +424,6 @@ class RegimeMapModuleWidget(QWidget):
         x_enabled = self.use_custom_x_limits_checkbox.isChecked() and not self._busy
         y_enabled = self.use_custom_y_limits_checkbox.isChecked() and not self._busy
         ppm_enabled = self.use_custom_ppm_scale_checkbox.isChecked() and not self._busy
-        right_line_enabled = self.co_checkbox.isChecked() and not self._busy
 
         self.x_min_spin.setEnabled(x_enabled)
         self.x_max_spin.setEnabled(x_enabled)
@@ -414,22 +432,22 @@ class RegimeMapModuleWidget(QWidget):
         self.ppm_min_spin.setEnabled(ppm_enabled)
         self.ppm_max_spin.setEnabled(ppm_enabled)
         self.ppm_step_spin.setEnabled(ppm_enabled)
-
-        if not self.co_checkbox.isChecked():
-            self.show_right_line_checkbox.setChecked(False)
-        self.show_right_line_checkbox.setEnabled(right_line_enabled)
-        self.co_checkbox.setEnabled(not self._busy)
+        self.show_right_line_checkbox.setEnabled(not self._busy)
         self.show_min_line_checkbox.setEnabled(not self._busy)
         self.show_mean_line_checkbox.setEnabled(not self._busy)
         self.use_custom_x_limits_checkbox.setEnabled(not self._busy)
         self.use_custom_y_limits_checkbox.setEnabled(not self._busy)
         self.use_custom_ppm_scale_checkbox.setEnabled(not self._busy)
+        self.x_axis_label_edit.setEnabled(not self._busy)
+        self.y_axis_label_edit.setEnabled(not self._busy)
+        self.colorbar_label_edit.setEnabled(not self._busy)
+        self.font_size_spin.setEnabled(not self._busy)
 
     def _format_line_list(self, config: RegimeMapJobConfig) -> str:
         names: list[str] = []
         if config.show_min_line:
             names.append("минимум")
-        if config.is_co_component and config.show_right_line:
+        if config.show_right_line:
             names.append("правая линия максимумов")
         if config.show_mean_line:
             names.append("средняя")

@@ -14,6 +14,10 @@ DEFAULT_Y_LIMITS = (0.6, 1.0)
 AUTO_CONTOUR_LEVELS = 10
 CO_COMPONENT_LABEL = "CO, ppm"
 GENERIC_COMPONENT_LABEL = "component"
+DEFAULT_X_AXIS_LABEL = "Расход топлива, кг/ч"
+DEFAULT_Y_AXIS_LABEL = "Расход пара, кг/ч"
+DEFAULT_FONT_FAMILY = "Times New Roman"
+DEFAULT_FONT_SIZE = 12
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,10 @@ class RegimeMapJobConfig:
     ppm_min: float = DEFAULT_CO_LEVELS[0]
     ppm_max: float = DEFAULT_CO_LEVELS[-1]
     ppm_step: float = float(DEFAULT_CO_LEVELS[1] - DEFAULT_CO_LEVELS[0])
+    x_axis_label: str = DEFAULT_X_AXIS_LABEL
+    y_axis_label: str = DEFAULT_Y_AXIS_LABEL
+    colorbar_label: str = CO_COMPONENT_LABEL
+    font_size: int = DEFAULT_FONT_SIZE
 
 
 @dataclass(frozen=True)
@@ -59,3 +67,8 @@ class RegimeMapResult:
     minima_line_fit: LineFit
     right_line_fit: LineFit
     mean_line_fit: LineFit
+    x_axis_label: str = DEFAULT_X_AXIS_LABEL
+    y_axis_label: str = DEFAULT_Y_AXIS_LABEL
+    colorbar_label: str = CO_COMPONENT_LABEL
+    font_family: str = DEFAULT_FONT_FAMILY
+    font_size: int = DEFAULT_FONT_SIZE

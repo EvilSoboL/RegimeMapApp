@@ -48,27 +48,38 @@ def test_regime_map_defaults_use_auto_ranges_and_enabled_line_options(qtbot) -> 
     widget = RegimeMapModuleWidget()
     qtbot.addWidget(widget)
 
-    assert widget.co_checkbox.isChecked()
     assert widget.show_min_line_checkbox.isChecked()
     assert widget.show_right_line_checkbox.isChecked()
     assert widget.show_mean_line_checkbox.isChecked()
+    assert widget.x_axis_label_edit.text() == "Расход топлива, кг/ч"
+    assert widget.y_axis_label_edit.text() == "Расход пара, кг/ч"
+    assert widget.colorbar_label_edit.text() == "CO, ppm"
+    assert widget.font_size_spin.value() == 12
     assert not widget.use_custom_x_limits_checkbox.isChecked()
     assert not widget.use_custom_y_limits_checkbox.isChecked()
     assert not widget.use_custom_ppm_scale_checkbox.isChecked()
     assert not widget.x_min_spin.isEnabled()
     assert not widget.y_min_spin.isEnabled()
     assert not widget.ppm_min_spin.isEnabled()
+    assert widget.show_right_line_checkbox.isEnabled()
 
 
-def test_unchecking_co_disables_right_line_overlay(qtbot) -> None:
+def test_custom_labels_and_font_size_are_collected_into_config(qtbot) -> None:
     widget = RegimeMapModuleWidget()
     qtbot.addWidget(widget)
 
-    widget.co_checkbox.setChecked(False)
+    widget.x_axis_label_edit.setText("Fuel flow")
+    widget.y_axis_label_edit.setText("Steam flow")
+    widget.colorbar_label_edit.setText("CO concentration")
+    widget.font_size_spin.setValue(15)
 
-    assert not widget.show_right_line_checkbox.isEnabled()
-    assert not widget.show_right_line_checkbox.isChecked()
-    assert widget.show_mean_line_checkbox.isEnabled()
+    config = widget.collect_config()
+
+    assert config.is_co_component is True
+    assert config.x_axis_label == "Fuel flow"
+    assert config.y_axis_label == "Steam flow"
+    assert config.colorbar_label == "CO concentration"
+    assert config.font_size == 15
 
 
 def test_invalid_manual_x_limits_disable_run_button(qtbot, tmp_path: Path) -> None:

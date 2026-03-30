@@ -12,6 +12,9 @@ from .exceptions import CancellationError, ProcessingError, ValidationError
 from .models import (
     AUTO_CONTOUR_LEVELS,
     CO_COMPONENT_LABEL,
+    DEFAULT_FONT_FAMILY,
+    DEFAULT_X_AXIS_LABEL,
+    DEFAULT_Y_AXIS_LABEL,
     GENERIC_COMPONENT_LABEL,
     RegimeMapJobConfig,
     RegimeMapResult,
@@ -65,11 +68,14 @@ class RegimeMapPipeline:
             raise ProcessingError(str(exc)) from exc
 
         mean_line_fit = self.compute_mean_line(diff_result.minima_line_fit, diff_result.right_line_fit)
-        component_label = CO_COMPONENT_LABEL if config.is_co_component else GENERIC_COMPONENT_LABEL
+        default_component_label = CO_COMPONENT_LABEL if config.is_co_component else GENERIC_COMPONENT_LABEL
+        colorbar_label = config.colorbar_label.strip() or default_component_label
         show_right_line = config.is_co_component and config.show_right_line
         x_limits = (float(config.x_min), float(config.x_max)) if config.use_custom_x_limits else None
         y_limits = (float(config.y_min), float(config.y_max)) if config.use_custom_y_limits else None
         co_levels = self.resolve_co_levels(config)
+        x_axis_label = config.x_axis_label.strip() or DEFAULT_X_AXIS_LABEL
+        y_axis_label = config.y_axis_label.strip() or DEFAULT_Y_AXIS_LABEL
 
         if config.show_right_line and not config.is_co_component:
             self._emit_log(on_log, "Правая линия максимумов скрыта, потому что флажок CO снят.")
@@ -84,7 +90,7 @@ class RegimeMapPipeline:
             fuel_axis=np.asarray(diff_result.fuel_axis, dtype=float),
             additive_axis=np.asarray(diff_result.additive_axis, dtype=float),
             component_grid=np.asarray(diff_result.component_grid, dtype=float),
-            component_label=component_label,
+            component_label=default_component_label,
             co_levels=co_levels,
             x_limits=x_limits,
             y_limits=y_limits,
@@ -95,6 +101,11 @@ class RegimeMapPipeline:
             minima_line_fit=diff_result.minima_line_fit,
             right_line_fit=diff_result.right_line_fit,
             mean_line_fit=mean_line_fit,
+            x_axis_label=x_axis_label,
+            y_axis_label=y_axis_label,
+            colorbar_label=colorbar_label,
+            font_family=DEFAULT_FONT_FAMILY,
+            font_size=int(config.font_size),
         )
 
     def compute_mean_line(self, minima_line_fit: LineFit, right_line_fit: LineFit) -> LineFit:
