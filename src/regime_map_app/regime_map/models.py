@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..diff_surface.models import LineFit
+from .cmaps import DEFAULT_CMAP_NAME
 
 DEFAULT_CO_LEVELS = np.arange(0.0, 201.0, 25.0, dtype=float)
 DEFAULT_X_LIMITS = (0.7, 1.3)
@@ -40,6 +41,7 @@ class RegimeMapJobConfig:
     x_axis_label: str = DEFAULT_X_AXIS_LABEL
     y_axis_label: str = DEFAULT_Y_AXIS_LABEL
     colorbar_label: str = CO_COMPONENT_LABEL
+    cmap_name: str = DEFAULT_CMAP_NAME
     font_size: int = DEFAULT_FONT_SIZE
 
 
@@ -70,5 +72,6 @@ class RegimeMapResult:
     x_axis_label: str = DEFAULT_X_AXIS_LABEL
     y_axis_label: str = DEFAULT_Y_AXIS_LABEL
     colorbar_label: str = CO_COMPONENT_LABEL
+    cmap_name: str = DEFAULT_CMAP_NAME
     font_family: str = DEFAULT_FONT_FAMILY
     font_size: int = DEFAULT_FONT_SIZE

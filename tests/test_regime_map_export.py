@@ -47,6 +47,7 @@ def _build_custom_result(input_path: Path) -> RegimeMapResult:
         minima_line_fit=LineFit(slope=1.0, intercept=0.0),
         right_line_fit=LineFit(slope=-0.5, intercept=1.25),
         mean_line_fit=LineFit(slope=0.25, intercept=0.625),
+        cmap_name="plasma",
     )
 
 
@@ -115,6 +116,7 @@ def test_render_result_draws_only_requested_lines_and_clips_to_custom_bounds() -
     assert main_axis.get_xlabel() == "Расход топлива, кг/ч"
     assert main_axis.get_ylabel() == "Расход пара, кг/ч"
     assert colorbar_axis.get_ylabel() == "CO, ppm"
+    assert main_axis.collections[0].get_cmap().name == "plasma"
     assert main_axis.xaxis.label.get_fontfamily() == [DEFAULT_FONT_FAMILY]
     assert main_axis.yaxis.label.get_fontfamily() == [DEFAULT_FONT_FAMILY]
     assert main_axis.title.get_fontfamily() == [DEFAULT_FONT_FAMILY]

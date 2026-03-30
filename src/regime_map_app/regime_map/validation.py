@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .cmaps import resolve_cmap_name
 from .models import RegimeMapJobConfig, ValidationResult
 
 
@@ -34,6 +35,9 @@ def validate_job_config(config: RegimeMapJobConfig) -> ValidationResult:
 
     if config.font_size <= 0:
         errors.append("Размер шрифта должен быть положительным.")
+
+    if resolve_cmap_name(config.cmap_name) is None:
+        errors.append(f"Цветовая карта {config.cmap_name!r} не поддерживается Matplotlib.")
 
     return ValidationResult(is_valid=not errors, errors=tuple(errors))
 

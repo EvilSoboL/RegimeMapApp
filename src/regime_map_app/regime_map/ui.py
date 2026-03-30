@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -14,14 +16,18 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from .cmaps import AVAILABLE_CMAP_NAMES, CMAP_REFERENCE_URL, DEFAULT_CMAP_NAME, resolve_cmap_name
 from .exceptions import RegimeMapError
 from .models import (
     CO_COMPONENT_LABEL,
@@ -73,7 +79,9 @@ class RegimeMapModuleWidget(QWidget):
         plot_layout = QVBoxLayout(plot_group)
         self.figure = create_figure()
         self.canvas = FigureCanvas(self.figure)
-        plot_layout.addWidget(self.canvas)
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        plot_layout.addWidget(self.canvas, 0, Qt.AlignmentFlag.AlignTop)
+        plot_layout.addStretch(1)
 
         root_layout.addWidget(controls_widget, 0)
         root_layout.addWidget(plot_group, 1)
@@ -108,6 +116,9 @@ class RegimeMapModuleWidget(QWidget):
         self.x_axis_label_edit = QLineEdit(DEFAULT_X_AXIS_LABEL)
         self.y_axis_label_edit = QLineEdit(DEFAULT_Y_AXIS_LABEL)
         self.colorbar_label_edit = QLineEdit(CO_COMPONENT_LABEL)
+        self.cmap_combo = self._build_cmap_combo()
+        self.cmap_help_button = self._build_cmap_help_button()
+        self.cmap_widget = self._build_cmap_widget()
 
         self.font_size_spin = self._build_int_spin(8, 36, DEFAULT_FONT_SIZE)
         self.font_size_spin.setSingleStep(1)
@@ -135,10 +146,11 @@ class RegimeMapModuleWidget(QWidget):
         layout.addRow("Подпись оси X:", self.x_axis_label_edit)
         layout.addRow("Подпись оси Y:", self.y_axis_label_edit)
         layout.addRow("Подпись шкалы:", self.colorbar_label_edit)
+        layout.addRow("Cmap:", self.cmap_widget)
         layout.addRow("Размер шрифта:", self.font_size_spin)
         layout.addRow("Границы X:", self.x_limits_widget)
         layout.addRow("Границы Y:", self.y_limits_widget)
-        layout.addRow("Шкала ppm:", self.ppm_scale_widget)
+        layout.addRow("Шкала Z:", self.ppm_scale_widget)
         return group
 
     def _build_actions_group(self) -> QGroupBox:
@@ -184,6 +196,35 @@ class RegimeMapModuleWidget(QWidget):
         spin.setValue(value)
         return spin
 
+    def _build_cmap_combo(self) -> QComboBox:
+        combo = QComboBox(self)
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.addItems(AVAILABLE_CMAP_NAMES)
+        combo.setCurrentText(DEFAULT_CMAP_NAME)
+        combo.setMaxVisibleItems(20)
+        completer = combo.completer()
+        if completer is not None:
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        if combo.lineEdit() is not None:
+            combo.lineEdit().setPlaceholderText(DEFAULT_CMAP_NAME)
+        return combo
+
+    def _build_cmap_help_button(self) -> QToolButton:
+        button = QToolButton(self)
+        button.setText("?")
+        button.setToolTip("Показать справку по доступным color maps")
+        return button
+
+    def _build_cmap_widget(self) -> QWidget:
+        widget = QWidget(self)
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.cmap_combo)
+        layout.addWidget(self.cmap_help_button)
+        return widget
+
     def _build_range_widget(self, checkbox: QCheckBox, lower_spin: QDoubleSpinBox, upper_spin: QDoubleSpinBox) -> QWidget:
         widget = QWidget(self)
         layout = QHBoxLayout(widget)
@@ -213,6 +254,7 @@ class RegimeMapModuleWidget(QWidget):
         self.validate_button.clicked.connect(self.validate_data)
         self.run_button.clicked.connect(self.start_processing)
         self.save_button.clicked.connect(self.save_results)
+        self.cmap_help_button.clicked.connect(self._show_cmap_help)
 
         self.show_min_line_checkbox.toggled.connect(self._on_parameters_changed)
         self.show_right_line_checkbox.toggled.connect(self._on_parameters_changed)
@@ -224,6 +266,7 @@ class RegimeMapModuleWidget(QWidget):
         self.x_axis_label_edit.textChanged.connect(self._on_parameters_changed)
         self.y_axis_label_edit.textChanged.connect(self._on_parameters_changed)
         self.colorbar_label_edit.textChanged.connect(self._on_parameters_changed)
+        self.cmap_combo.currentTextChanged.connect(self._on_parameters_changed)
         self.font_size_spin.valueChanged.connect(self._on_parameters_changed)
         self.x_min_spin.valueChanged.connect(self._on_parameters_changed)
         self.x_max_spin.valueChanged.connect(self._on_parameters_changed)
@@ -232,6 +275,8 @@ class RegimeMapModuleWidget(QWidget):
         self.ppm_min_spin.valueChanged.connect(self._on_parameters_changed)
         self.ppm_max_spin.valueChanged.connect(self._on_parameters_changed)
         self.ppm_step_spin.valueChanged.connect(self._on_parameters_changed)
+        if self.cmap_combo.lineEdit() is not None:
+            self.cmap_combo.lineEdit().editingFinished.connect(self._normalize_cmap_text)
 
     def collect_config(self) -> RegimeMapJobConfig:
         return RegimeMapJobConfig(
@@ -253,6 +298,7 @@ class RegimeMapModuleWidget(QWidget):
             x_axis_label=self.x_axis_label_edit.text(),
             y_axis_label=self.y_axis_label_edit.text(),
             colorbar_label=self.colorbar_label_edit.text(),
+            cmap_name=self.cmap_combo.currentText(),
             font_size=self.font_size_spin.value(),
         )
 
@@ -318,6 +364,7 @@ class RegimeMapModuleWidget(QWidget):
         self.append_log(f"Подпись X: {config.x_axis_label.strip() or DEFAULT_X_AXIS_LABEL}")
         self.append_log(f"Подпись Y: {config.y_axis_label.strip() or DEFAULT_Y_AXIS_LABEL}")
         self.append_log(f"Подпись шкалы: {config.colorbar_label.strip() or CO_COMPONENT_LABEL}")
+        self.append_log(f"Cmap: {resolve_cmap_name(config.cmap_name) or config.cmap_name.strip() or DEFAULT_CMAP_NAME}")
         self.append_log(f"Размер шрифта: {config.font_size} pt")
         self.append_log(f"Границы X: {self._format_range(config.use_custom_x_limits, config.x_min, config.x_max)}")
         self.append_log(f"Границы Y: {self._format_range(config.use_custom_y_limits, config.y_min, config.y_max)}")
@@ -420,6 +467,11 @@ class RegimeMapModuleWidget(QWidget):
         self._refresh_parameter_controls()
         self.refresh_form_state()
 
+    def _normalize_cmap_text(self) -> None:
+        resolved_name = resolve_cmap_name(self.cmap_combo.currentText())
+        if resolved_name is not None and resolved_name != self.cmap_combo.currentText():
+            self.cmap_combo.setCurrentText(resolved_name)
+
     def _refresh_parameter_controls(self) -> None:
         x_enabled = self.use_custom_x_limits_checkbox.isChecked() and not self._busy
         y_enabled = self.use_custom_y_limits_checkbox.isChecked() and not self._busy
@@ -441,7 +493,20 @@ class RegimeMapModuleWidget(QWidget):
         self.x_axis_label_edit.setEnabled(not self._busy)
         self.y_axis_label_edit.setEnabled(not self._busy)
         self.colorbar_label_edit.setEnabled(not self._busy)
+        self.cmap_combo.setEnabled(not self._busy)
         self.font_size_spin.setEnabled(not self._busy)
+
+    def _show_cmap_help(self) -> None:
+        message_box = QMessageBox(self)
+        message_box.setIcon(QMessageBox.Icon.Information)
+        message_box.setWindowTitle("Справка по cmap")
+        message_box.setText("Описание доступных color maps есть в справочнике Matplotlib.")
+        message_box.setInformativeText(CMAP_REFERENCE_URL)
+        open_button = message_box.addButton("Открыть ссылку", QMessageBox.ButtonRole.ActionRole)
+        message_box.addButton(QMessageBox.StandardButton.Ok)
+        message_box.exec()
+        if message_box.clickedButton() is open_button:
+            QDesktopServices.openUrl(QUrl(CMAP_REFERENCE_URL))
 
     def _format_line_list(self, config: RegimeMapJobConfig) -> str:
         names: list[str] = []

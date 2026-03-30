@@ -7,11 +7,13 @@ import numpy as np
 import pytest
 
 regime_models = import_module("regime_map_app.regime_map.models")
+regime_cmaps_module = import_module("regime_map_app.regime_map.cmaps")
 regime_pipeline_module = import_module("regime_map_app.regime_map.pipeline")
 diff_models = import_module("regime_map_app.diff_surface.models")
 
 AUTO_CONTOUR_LEVELS = regime_models.AUTO_CONTOUR_LEVELS
 CO_COMPONENT_LABEL = regime_models.CO_COMPONENT_LABEL
+DEFAULT_CMAP_NAME = regime_cmaps_module.DEFAULT_CMAP_NAME
 GENERIC_COMPONENT_LABEL = regime_models.GENERIC_COMPONENT_LABEL
 RegimeMapJobConfig = regime_models.RegimeMapJobConfig
 RegimeMapPipeline = regime_pipeline_module.RegimeMapPipeline
@@ -148,6 +150,7 @@ def test_process_job_supports_custom_ranges_and_ppm_scale(tmp_path: Path) -> Non
             x_axis_label="Fuel flow",
             y_axis_label="Steam flow",
             colorbar_label="CO concentration",
+            cmap_name="Plasma",
             font_size=16,
         )
     )
@@ -161,4 +164,21 @@ def test_process_job_supports_custom_ranges_and_ppm_scale(tmp_path: Path) -> Non
     assert result.x_axis_label == "Fuel flow"
     assert result.y_axis_label == "Steam flow"
     assert result.colorbar_label == "CO concentration"
+    assert result.cmap_name == "plasma"
     assert result.font_size == 16
+
+
+def test_process_job_uses_default_cmap_when_value_is_blank(tmp_path: Path) -> None:
+    input_file = tmp_path / "surface.csv"
+    _write_success_surface_csv(input_file)
+    stub_diff_pipeline = StubDiffPipeline(_build_diff_result(input_file))
+    pipeline = RegimeMapPipeline(diff_pipeline=stub_diff_pipeline)
+
+    result = pipeline.process_job(
+        RegimeMapJobConfig(
+            input_path=input_file,
+            cmap_name="   ",
+        )
+    )
+
+    assert result.cmap_name == DEFAULT_CMAP_NAME

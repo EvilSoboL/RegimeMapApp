@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib import colormaps
 from matplotlib.figure import Figure
 
+from .cmaps import DEFAULT_CMAP_NAME, resolve_cmap_name
 from .exceptions import SaveError
 from .models import RegimeMapResult
 
@@ -40,7 +41,8 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
     axis = figure.add_subplot(111)
 
     fuel_grid, additive_grid = np.meshgrid(result.fuel_axis, result.additive_axis)
-    cmap = colormaps["viridis"].copy()
+    cmap_name = resolve_cmap_name(result.cmap_name) or DEFAULT_CMAP_NAME
+    cmap = colormaps[cmap_name].copy()
     cmap.set_over("darkred")
 
     contour_kwargs: dict[str, object] = {

@@ -8,6 +8,7 @@ from ..diff_surface.exceptions import CancellationError as DiffSurfaceCancellati
 from ..diff_surface.exceptions import DiffSurfaceError
 from ..diff_surface.models import DiffSurfaceJobConfig, LineFit, SurfaceMode
 from ..diff_surface.pipeline import DiffSurfacePipeline
+from .cmaps import DEFAULT_CMAP_NAME, resolve_cmap_name
 from .exceptions import CancellationError, ProcessingError, ValidationError
 from .models import (
     AUTO_CONTOUR_LEVELS,
@@ -74,6 +75,7 @@ class RegimeMapPipeline:
         x_limits = (float(config.x_min), float(config.x_max)) if config.use_custom_x_limits else None
         y_limits = (float(config.y_min), float(config.y_max)) if config.use_custom_y_limits else None
         co_levels = self.resolve_co_levels(config)
+        cmap_name = resolve_cmap_name(config.cmap_name) or DEFAULT_CMAP_NAME
         x_axis_label = config.x_axis_label.strip() or DEFAULT_X_AXIS_LABEL
         y_axis_label = config.y_axis_label.strip() or DEFAULT_Y_AXIS_LABEL
 
@@ -104,6 +106,7 @@ class RegimeMapPipeline:
             x_axis_label=x_axis_label,
             y_axis_label=y_axis_label,
             colorbar_label=colorbar_label,
+            cmap_name=cmap_name,
             font_family=DEFAULT_FONT_FAMILY,
             font_size=int(config.font_size),
         )

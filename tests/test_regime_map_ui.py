@@ -10,9 +10,12 @@ pytest.importorskip("pytestqt")
 pytest.importorskip("matplotlib")
 
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QSizePolicy
 
+regime_cmaps_module = import_module("regime_map_app.regime_map.cmaps")
 regime_ui_module = import_module("regime_map_app.regime_map.ui")
 
+DEFAULT_CMAP_NAME = regime_cmaps_module.DEFAULT_CMAP_NAME
 RegimeMapModuleWidget = regime_ui_module.RegimeMapModuleWidget
 
 
@@ -54,6 +57,8 @@ def test_regime_map_defaults_use_auto_ranges_and_enabled_line_options(qtbot) -> 
     assert widget.x_axis_label_edit.text() == "Расход топлива, кг/ч"
     assert widget.y_axis_label_edit.text() == "Расход пара, кг/ч"
     assert widget.colorbar_label_edit.text() == "CO, ppm"
+    assert widget.cmap_combo.currentText() == DEFAULT_CMAP_NAME
+    assert widget.cmap_combo.isEditable()
     assert widget.font_size_spin.value() == 12
     assert not widget.use_custom_x_limits_checkbox.isChecked()
     assert not widget.use_custom_y_limits_checkbox.isChecked()
@@ -71,6 +76,7 @@ def test_custom_labels_and_font_size_are_collected_into_config(qtbot) -> None:
     widget.x_axis_label_edit.setText("Fuel flow")
     widget.y_axis_label_edit.setText("Steam flow")
     widget.colorbar_label_edit.setText("CO concentration")
+    widget.cmap_combo.setCurrentText("plasma")
     widget.font_size_spin.setValue(15)
 
     config = widget.collect_config()
@@ -79,7 +85,33 @@ def test_custom_labels_and_font_size_are_collected_into_config(qtbot) -> None:
     assert config.x_axis_label == "Fuel flow"
     assert config.y_axis_label == "Steam flow"
     assert config.colorbar_label == "CO concentration"
+    assert config.cmap_name == "plasma"
     assert config.font_size == 15
+
+
+def test_invalid_cmap_disables_run_button(qtbot, tmp_path: Path) -> None:
+    widget = RegimeMapModuleWidget()
+    qtbot.addWidget(widget)
+
+    input_file = tmp_path / "surface.csv"
+    _write_success_surface_csv(input_file)
+    widget.set_input_path(input_file, user_selected=True)
+    widget.cmap_combo.setCurrentText("not-a-real-cmap")
+
+    assert not widget.run_button.isEnabled()
+
+
+def test_plot_canvas_is_top_aligned_in_gui(qtbot) -> None:
+    widget = RegimeMapModuleWidget()
+    qtbot.addWidget(widget)
+
+    plot_group = widget.layout().itemAt(1).widget()
+    plot_layout = plot_group.layout()
+    canvas_item = plot_layout.itemAt(0)
+
+    assert canvas_item.widget() is widget.canvas
+    assert canvas_item.alignment() & Qt.AlignTop
+    assert widget.canvas.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Maximum
 
 
 def test_invalid_manual_x_limits_disable_run_button(qtbot, tmp_path: Path) -> None:
