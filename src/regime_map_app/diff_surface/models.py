@@ -8,6 +8,8 @@ from numpy.typing import NDArray
 
 CSV_SEPARATOR = ";"
 REQUIRED_COLUMNS = ("fuel", "additive", "component")
+DEFAULT_ANALYSIS_CONTOUR_LEVELS = "3"
+DEFAULT_CONTOUR_LEVEL_COUNT = 10
 
 
 class SurfaceMode(str, Enum):
@@ -18,10 +20,27 @@ class SurfaceMode(str, Enum):
         return "|grad|"
 
 
+class MaximaDetectionMethod(str, Enum):
+    ROW_PEAKS = "row_peaks"
+    CONTOUR_LEVELS = "contour_levels"
+
+    @property
+    def label(self) -> str:
+        if self is MaximaDetectionMethod.ROW_PEAKS:
+            return "По локальным пикам строк"
+        return "По линиям уровня"
+
+    @property
+    def uses_contour_levels(self) -> bool:
+        return self is MaximaDetectionMethod.CONTOUR_LEVELS
+
+
 @dataclass(frozen=True)
 class DiffSurfaceJobConfig:
     input_path: Path | None
     surface_mode: SurfaceMode = SurfaceMode.GRADIENT_MAGNITUDE
+    maxima_detection_method: MaximaDetectionMethod = MaximaDetectionMethod.ROW_PEAKS
+    contour_levels_text: str = DEFAULT_ANALYSIS_CONTOUR_LEVELS
 
 
 @dataclass(frozen=True)
@@ -53,3 +72,6 @@ class DifferentialSurfaceResult:
     right_maxima_points: NDArray
     left_line_fit: LineFit
     right_line_fit: LineFit
+    maxima_detection_method: MaximaDetectionMethod = MaximaDetectionMethod.ROW_PEAKS
+    analysis_contour_indices: tuple[int, ...] = ()
+    analysis_contour_values: tuple[float, ...] = ()

@@ -6,18 +6,21 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
+from matplotlib.figure import Figure
 
 from .exceptions import CancellationError, CsvValidationError, DiffSurfaceError, ProcessingError, ValidationError
 from .models import (
     CSV_SEPARATOR,
+    DEFAULT_CONTOUR_LEVEL_COUNT,
     REQUIRED_COLUMNS,
     DiffSurfaceJobConfig,
     DifferentialSurfaceResult,
     LineFit,
+    MaximaDetectionMethod,
     SurfaceMode,
     ValidationResult,
 )
-from .validation import validate_job_config
+from .validation import parse_contour_level_indices, validate_job_config
 
 ALTERNATIVE_CSV_DELIMITERS = (",", "\t", "|")
 
@@ -38,9 +41,16 @@ class DiffSurfacePipeline:
         assert config.input_path is not None
         try:
             frame = self.read_dataset(config.input_path)
-            self.build_regular_grid(frame)
+            fuel_axis, additive_axis, component_grid = self.build_regular_grid(frame)
+            if config.maxima_detection_method.uses_contour_levels:
+                dz_dx, dz_dy = self.compute_derivatives(component_grid, additive_axis, fuel_axis)
+                selected_surface = self.build_selected_surface(dz_dx, dz_dy, config.surface_mode)
+                contour_level_indices = parse_contour_level_indices(config.contour_levels_text)
+                self.resolve_contour_level_values(selected_surface, contour_level_indices)
             checked_points = len(frame.index)
         except DiffSurfaceError as exc:
+            errors.append(str(exc))
+        except ValueError as exc:
             errors.append(str(exc))
 
         return ValidationResult(
@@ -182,10 +192,17 @@ class DiffSurfacePipeline:
         minimum_line_fit: LineFit,
     ) -> tuple[np.ndarray, np.ndarray]:
         all_points = np.vstack((first_peak_points, second_peak_points)).astype(float)
-        minimum_line_values = minimum_line_fit.slope * all_points[:, 0] + minimum_line_fit.intercept
+        return self.classify_points_by_reference_line(all_points, minimum_line_fit)
+
+    def classify_points_by_reference_line(
+        self,
+        points: np.ndarray,
+        reference_line_fit: LineFit,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        reference_line_values = reference_line_fit.slope * points[:, 0] + reference_line_fit.intercept
         tolerance = 1e-9
-        left_points = all_points[all_points[:, 1] >= minimum_line_values - tolerance]
-        right_points = all_points[all_points[:, 1] < minimum_line_values - tolerance]
+        left_points = points[points[:, 1] >= reference_line_values - tolerance]
+        right_points = points[points[:, 1] < reference_line_values - tolerance]
 
         if len(left_points) == 0 or len(right_points) == 0:
             raise ProcessingError(
@@ -194,7 +211,7 @@ class DiffSurfacePipeline:
 
         return self._sort_points(left_points), self._sort_points(right_points)
 
-    def find_maxima_points(
+    def find_maxima_points_from_row_peaks(
         self,
         surface: np.ndarray,
         fuel_axis: np.ndarray,
@@ -203,6 +220,115 @@ class DiffSurfacePipeline:
     ) -> tuple[np.ndarray, np.ndarray]:
         first_peak_points, second_peak_points = self.find_peak_pair_points(surface, fuel_axis, additive_axis)
         return self.split_maxima_points_by_minimum_line(first_peak_points, second_peak_points, minimum_line_fit)
+
+    def build_available_contour_levels(
+        self,
+        surface: np.ndarray,
+        *,
+        level_count: int = DEFAULT_CONTOUR_LEVEL_COUNT,
+    ) -> np.ndarray:
+        surface_min = float(np.min(surface))
+        surface_max = float(np.max(surface))
+        if np.isclose(surface_min, surface_max):
+            raise ProcessingError("Для анализа по линиям уровня поверхность должна содержать разные значения.")
+        return np.linspace(surface_min, surface_max, level_count + 2, dtype=float)[1:-1]
+
+    def resolve_contour_level_values(
+        self,
+        surface: np.ndarray,
+        contour_level_indices: tuple[int, ...],
+    ) -> tuple[float, ...]:
+        available_levels = self.build_available_contour_levels(surface)
+        max_index = len(available_levels)
+        resolved_levels: list[float] = []
+        for contour_level_index in contour_level_indices:
+            if contour_level_index > max_index:
+                raise ProcessingError(
+                    f"Номер линии уровня {contour_level_index} выходит за диапазон 1..{max_index}."
+                )
+            resolved_levels.append(float(available_levels[contour_level_index - 1]))
+        return tuple(resolved_levels)
+
+    def extract_contour_points(
+        self,
+        surface: np.ndarray,
+        fuel_axis: np.ndarray,
+        additive_axis: np.ndarray,
+        contour_values: tuple[float, ...],
+    ) -> np.ndarray:
+        fuel_grid, additive_grid = np.meshgrid(fuel_axis, additive_axis)
+        figure = Figure()
+        axis = figure.add_subplot(111)
+        try:
+            contour_set = axis.contour(
+                fuel_grid,
+                additive_grid,
+                surface,
+                levels=np.asarray(contour_values, dtype=float),
+            )
+        except Exception as exc:
+            raise ProcessingError(f"Не удалось построить линии уровня для анализа: {exc}") from exc
+
+        collected_points: list[np.ndarray] = []
+        for contour_value, segments in zip(contour_set.levels, contour_set.allsegs):
+            valid_segments = [np.asarray(segment, dtype=float) for segment in segments if len(segment) >= 2]
+            if not valid_segments:
+                raise ProcessingError(
+                    f"Не удалось извлечь точки для линии уровня со значением {float(contour_value):.6g}."
+                )
+            collected_points.extend(valid_segments)
+
+        if not collected_points:
+            raise ProcessingError("Не удалось получить точки линий уровня для анализа максимумов.")
+
+        all_points = np.vstack(collected_points).astype(float)
+        figure.clear()
+        return self._sort_points(all_points)
+
+    def find_maxima_points_from_contour_levels(
+        self,
+        surface: np.ndarray,
+        fuel_axis: np.ndarray,
+        additive_axis: np.ndarray,
+        minimum_line_fit: LineFit,
+        contour_level_indices: tuple[int, ...],
+    ) -> tuple[np.ndarray, np.ndarray, tuple[float, ...]]:
+        contour_values = self.resolve_contour_level_values(surface, contour_level_indices)
+        contour_points = self.extract_contour_points(surface, fuel_axis, additive_axis, contour_values)
+        left_points, right_points = self.classify_points_by_reference_line(contour_points, minimum_line_fit)
+        return left_points, right_points, contour_values
+
+    def find_maxima_points(
+        self,
+        surface: np.ndarray,
+        fuel_axis: np.ndarray,
+        additive_axis: np.ndarray,
+        minimum_line_fit: LineFit,
+        config: DiffSurfaceJobConfig | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, tuple[int, ...], tuple[float, ...]]:
+        if config is None:
+            config = DiffSurfaceJobConfig(
+                input_path=None,
+                surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
+            )
+        if config.maxima_detection_method is MaximaDetectionMethod.ROW_PEAKS:
+            left_points, right_points = self.find_maxima_points_from_row_peaks(
+                surface,
+                fuel_axis,
+                additive_axis,
+                minimum_line_fit,
+            )
+            return left_points, right_points, (), ()
+
+        contour_level_indices = parse_contour_level_indices(config.contour_levels_text)
+        left_points, right_points, contour_values = self.find_maxima_points_from_contour_levels(
+            surface,
+            fuel_axis,
+            additive_axis,
+            minimum_line_fit,
+            contour_level_indices,
+        )
+        return left_points, right_points, contour_level_indices, contour_values
 
     def find_two_peak_indices(self, row: np.ndarray) -> tuple[int, int]:
         if row.ndim != 1 or row.size < 2:
@@ -281,18 +407,28 @@ class DiffSurfacePipeline:
         dz_dx, dz_dy = self.compute_derivatives(component_grid, additive_axis, fuel_axis)
         selected_surface = self.build_selected_surface(dz_dx, dz_dy, config.surface_mode)
         self._emit_log(on_log, f"Рассчитана поверхность в режиме {config.surface_mode.label}.")
+        self._emit_log(on_log, f"Метод поиска максимумов: {config.maxima_detection_method.label}.")
+        if config.maxima_detection_method.uses_contour_levels:
+            self._emit_log(on_log, f"Запрошены номера линий уровня: {config.contour_levels_text}.")
         self._emit_progress(on_progress, 60)
 
         self._check_cancel(should_cancel)
         minima_points = self.find_minima_points(component_grid, fuel_axis, additive_axis)
         minima_line_fit = self.fit_line(minima_points, "линии минимумов концентрации")
-        left_maxima_points, right_maxima_points = self.find_maxima_points(
+        left_maxima_points, right_maxima_points, contour_level_indices, contour_level_values = self.find_maxima_points(
             selected_surface,
             fuel_axis,
             additive_axis,
             minima_line_fit,
+            config,
         )
         self._emit_log(on_log, f"Найдена линия минимумов концентрации по {len(minima_points)} точкам.")
+        if contour_level_indices:
+            contour_details = ", ".join(
+                f"№{index} ({value:.6g})"
+                for index, value in zip(contour_level_indices, contour_level_values)
+            )
+            self._emit_log(on_log, f"Для анализа использованы линии уровня: {contour_details}.")
         self._emit_log(on_log, f"Найдено точек максимумов слева выше линии минимума: {len(left_maxima_points)}.")
         self._emit_log(on_log, f"Найдено точек максимумов справа ниже линии минимума: {len(right_maxima_points)}.")
         self._emit_progress(on_progress, 80)
@@ -329,6 +465,9 @@ class DiffSurfacePipeline:
             right_maxima_points=right_maxima_points,
             left_line_fit=left_line_fit,
             right_line_fit=right_line_fit,
+            maxima_detection_method=config.maxima_detection_method,
+            analysis_contour_indices=contour_level_indices,
+            analysis_contour_values=contour_level_values,
         )
 
     def _emit_log(self, callback: LogCallback | None, message: str) -> None:

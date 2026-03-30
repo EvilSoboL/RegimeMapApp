@@ -31,6 +31,17 @@ def render_result(figure: Figure, result: DifferentialSurfaceResult) -> None:
     contour = axis.contourf(fuel_grid, additive_grid, result.selected_surface, levels=levels, cmap="viridis")
     figure.colorbar(contour, ax=axis, label=result.surface_mode.label)
 
+    if result.analysis_contour_values:
+        axis.contour(
+            fuel_grid,
+            additive_grid,
+            result.selected_surface,
+            levels=np.asarray(result.analysis_contour_values, dtype=float),
+            colors="white",
+            linestyles=":",
+            linewidths=1.3,
+        )
+
     axis.scatter(
         result.left_maxima_points[:, 0],
         result.left_maxima_points[:, 1],

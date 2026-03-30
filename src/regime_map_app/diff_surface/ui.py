@@ -5,6 +5,7 @@ from pathlib import Path
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -20,7 +21,13 @@ from PySide6.QtWidgets import (
 )
 
 from .exceptions import DiffSurfaceError
-from .models import DiffSurfaceJobConfig, DifferentialSurfaceResult, SurfaceMode
+from .models import (
+    DEFAULT_ANALYSIS_CONTOUR_LEVELS,
+    DiffSurfaceJobConfig,
+    DifferentialSurfaceResult,
+    MaximaDetectionMethod,
+    SurfaceMode,
+)
 from .pipeline import DiffSurfacePipeline
 from .validation import resolve_export_path, validate_job_config
 from .visualization import create_figure, render_placeholder, render_result, save_plot
@@ -41,6 +48,7 @@ class DiffSurfaceModuleWidget(QWidget):
 
         self._build_ui()
         self._wire_signals()
+        self._refresh_parameter_controls()
         self.refresh_form_state()
         render_placeholder(self.figure, "Результат еще не построен.")
 
@@ -85,7 +93,14 @@ class DiffSurfaceModuleWidget(QWidget):
         layout = QFormLayout(group)
 
         self.surface_mode_label = QLabel(SurfaceMode.GRADIENT_MAGNITUDE.label)
+        self.maxima_detection_combo = QComboBox()
+        for method in MaximaDetectionMethod:
+            self.maxima_detection_combo.addItem(method.label, method)
+        self.contour_levels_edit = QLineEdit(DEFAULT_ANALYSIS_CONTOUR_LEVELS)
+        self.contour_levels_edit.setPlaceholderText("Например: 3, 4")
         layout.addRow("Тип поверхности:", self.surface_mode_label)
+        layout.addRow("Поиск максимумов:", self.maxima_detection_combo)
+        layout.addRow("Уровни контура:", self.contour_levels_edit)
         return group
 
     def _build_actions_group(self) -> QGroupBox:
@@ -122,14 +137,24 @@ class DiffSurfaceModuleWidget(QWidget):
         self.validate_button.clicked.connect(self.validate_data)
         self.run_button.clicked.connect(self.start_processing)
         self.save_button.clicked.connect(self.save_results)
+        self.maxima_detection_combo.currentIndexChanged.connect(self._on_parameters_changed)
+        self.contour_levels_edit.textChanged.connect(self._on_parameters_changed)
 
     def current_surface_mode(self) -> SurfaceMode:
         return SurfaceMode.GRADIENT_MAGNITUDE
+
+    def current_maxima_detection_method(self) -> MaximaDetectionMethod:
+        method = self.maxima_detection_combo.currentData()
+        if isinstance(method, MaximaDetectionMethod):
+            return method
+        return MaximaDetectionMethod(method)
 
     def collect_config(self) -> DiffSurfaceJobConfig:
         return DiffSurfaceJobConfig(
             input_path=self._selected_input_path,
             surface_mode=self.current_surface_mode(),
+            maxima_detection_method=self.current_maxima_detection_method(),
+            contour_levels_text=self.contour_levels_edit.text(),
         )
 
     def refresh_form_state(self) -> None:
@@ -140,6 +165,7 @@ class DiffSurfaceModuleWidget(QWidget):
         self.run_button.setEnabled(run_ready)
         self.save_button.setEnabled(self._last_result is not None and not self._busy)
         self.select_input_button.setEnabled(not self._busy)
+        self._refresh_parameter_controls()
 
     def set_input_path(self, path: Path, *, user_selected: bool) -> None:
         self._selected_input_path = path
@@ -190,6 +216,9 @@ class DiffSurfaceModuleWidget(QWidget):
         self.log_edit.clear()
         self.append_log(f"Файл: {input_path.name}")
         self.append_log(f"Режим поверхности: {config.surface_mode.label}")
+        self.append_log(f"Метод поиска максимумов: {config.maxima_detection_method.label}")
+        if config.maxima_detection_method.uses_contour_levels:
+            self.append_log(f"Номера линий уровня: {config.contour_levels_text}")
         self.progress_bar.setValue(0)
         self.status_label.setText("Статус: запуск фонового построения")
         self._set_busy(True)
@@ -267,6 +296,12 @@ class DiffSurfaceModuleWidget(QWidget):
     def _on_completed(self, result: DifferentialSurfaceResult) -> None:
         self._last_result = result
         render_result(self.figure, result)
+        if result.analysis_contour_indices:
+            contour_details = ", ".join(
+                f"№{index} ({value:.6g})"
+                for index, value in zip(result.analysis_contour_indices, result.analysis_contour_values)
+            )
+            self.append_log(f"Использованы линии уровня: {contour_details}.")
         self.append_log(
             f"Построение завершено. Линия минимальной концентрации: a={result.minima_line_fit.slope:.6g}, b={result.minima_line_fit.intercept:.6g}."
         )
@@ -283,6 +318,18 @@ class DiffSurfaceModuleWidget(QWidget):
 
     def _on_cancelled(self) -> None:
         self.append_log("Построение остановлено пользователем.")
+
+    def _on_parameters_changed(self, *_args) -> None:
+        self._invalidate_result()
+        self.refresh_form_state()
+
+    def _refresh_parameter_controls(self) -> None:
+        contour_levels_enabled = (
+            self.current_maxima_detection_method().uses_contour_levels
+            and not self._busy
+        )
+        self.maxima_detection_combo.setEnabled(not self._busy)
+        self.contour_levels_edit.setEnabled(contour_levels_enabled)
 
 
 class DiffSurfaceModuleWindow(QMainWindow):

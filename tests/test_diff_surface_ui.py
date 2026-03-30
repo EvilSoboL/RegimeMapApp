@@ -13,12 +13,14 @@ from PySide6.QtCore import Qt
 
 app_main_window_module = import_module("regime_map_app.main_window")
 approx_models = import_module("regime_map_app.approx.models")
+diff_models = import_module("regime_map_app.diff_surface.models")
 diff_ui_module = import_module("regime_map_app.diff_surface.ui")
 
 RegimeMapMainWindow = app_main_window_module.RegimeMapMainWindow
 BatchProcessSummary = approx_models.BatchProcessSummary
 FileProcessResult = approx_models.FileProcessResult
 DiffSurfaceModuleWidget = diff_ui_module.DiffSurfaceModuleWidget
+MaximaDetectionMethod = diff_models.MaximaDetectionMethod
 
 
 def _write_success_surface_csv(path: Path) -> None:
@@ -54,6 +56,8 @@ def test_diff_surface_run_button_is_disabled_until_file_is_selected(qtbot, tmp_p
     qtbot.addWidget(widget)
 
     assert widget.surface_mode_label.text() == "|grad|"
+    assert widget.current_maxima_detection_method() is MaximaDetectionMethod.ROW_PEAKS
+    assert not widget.contour_levels_edit.isEnabled()
     assert not widget.run_button.isEnabled()
     assert not widget.validate_button.isEnabled()
     assert not widget.save_button.isEnabled()
@@ -65,6 +69,26 @@ def test_diff_surface_run_button_is_disabled_until_file_is_selected(qtbot, tmp_p
     assert widget.run_button.isEnabled()
     assert widget.validate_button.isEnabled()
     assert not widget.save_button.isEnabled()
+
+
+def test_diff_surface_contour_level_method_enables_level_input_and_validates_text(qtbot, tmp_path: Path) -> None:
+    widget = DiffSurfaceModuleWidget()
+    qtbot.addWidget(widget)
+
+    input_file = tmp_path / "surface.csv"
+    _write_success_surface_csv(input_file)
+    widget.set_input_path(input_file, user_selected=True)
+
+    widget.maxima_detection_combo.setCurrentIndex(1)
+
+    assert widget.current_maxima_detection_method() is MaximaDetectionMethod.CONTOUR_LEVELS
+    assert widget.contour_levels_edit.isEnabled()
+
+    widget.contour_levels_edit.setText("bad")
+    assert not widget.run_button.isEnabled()
+
+    widget.contour_levels_edit.setText("3, 4")
+    assert widget.run_button.isEnabled()
 
 
 def test_diff_surface_run_button_stays_disabled_for_invalid_csv(qtbot, tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ pipeline_module = import_module("regime_map_app.diff_surface.pipeline")
 CSV_SEPARATOR = models.CSV_SEPARATOR
 REQUIRED_COLUMNS = models.REQUIRED_COLUMNS
 DiffSurfaceJobConfig = models.DiffSurfaceJobConfig
+MaximaDetectionMethod = models.MaximaDetectionMethod
 DiffSurfacePipeline = pipeline_module.DiffSurfacePipeline
 
 
@@ -80,3 +81,19 @@ def test_validate_inputs_reports_insufficient_unique_axis_values(tmp_path: Path)
 
     assert not validation.is_valid
     assert validation.errors == ("В файле surface.csv недостаточно уникальных значений fuel или additive.",)
+
+
+def test_validate_inputs_reports_invalid_contour_level_list(tmp_path: Path) -> None:
+    input_file = tmp_path / "surface.csv"
+    _write_csv(input_file, [(0, 0, 1), (0, 1, 2), (1, 0, 3), (1, 1, 4)])
+
+    validation = DiffSurfacePipeline().validate_inputs(
+        DiffSurfaceJobConfig(
+            input_path=input_file,
+            maxima_detection_method=MaximaDetectionMethod.CONTOUR_LEVELS,
+            contour_levels_text="0, bad",
+        )
+    )
+
+    assert not validation.is_valid
+    assert any("линий уровня" in error.lower() or "линии уровня" in error.lower() for error in validation.errors)

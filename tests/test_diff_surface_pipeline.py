@@ -12,6 +12,7 @@ pipeline_module = import_module("regime_map_app.diff_surface.pipeline")
 CSV_SEPARATOR = models.CSV_SEPARATOR
 REQUIRED_COLUMNS = models.REQUIRED_COLUMNS
 DiffSurfaceJobConfig = models.DiffSurfaceJobConfig
+MaximaDetectionMethod = models.MaximaDetectionMethod
 SurfaceMode = models.SurfaceMode
 DiffSurfacePipeline = pipeline_module.DiffSurfacePipeline
 
@@ -111,7 +112,7 @@ def test_find_maxima_points_uses_minimum_line_for_grouping() -> None:
     additive_axis = np.array([0.0, 1.0, 2.0, 3.0])
     minimum_line_fit = models.LineFit(slope=1.0, intercept=0.0)
 
-    left_points, right_points = pipeline.find_maxima_points(
+    left_points, right_points, contour_indices, contour_values = pipeline.find_maxima_points(
         surface,
         fuel_axis,
         additive_axis,
@@ -120,6 +121,43 @@ def test_find_maxima_points_uses_minimum_line_for_grouping() -> None:
 
     assert np.array_equal(left_points, np.array([[0.0, 0.0], [1.0, 1.0], [3.0, 3.0]]))
     assert np.array_equal(right_points, np.array([[3.0, 0.0], [3.0, 1.0], [3.0, 2.0], [5.0, 2.0], [5.0, 3.0]]))
+    assert contour_indices == ()
+    assert contour_values == ()
+
+
+def test_find_maxima_points_supports_contour_level_method() -> None:
+    pipeline = DiffSurfacePipeline()
+    surface = np.array(
+        [
+            [9.0, 5.0, 1.0, 5.0, 9.0],
+            [8.0, 4.0, 0.0, 6.0, 8.0],
+            [7.0, 3.0, 0.0, 7.0, 7.0],
+            [6.0, 2.0, 0.0, 8.0, 6.0],
+        ]
+    )
+    fuel_axis = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+    additive_axis = np.array([0.0, 1.0, 2.0, 3.0])
+    minimum_line_fit = models.LineFit(slope=1.0, intercept=0.0)
+
+    left_points, right_points, contour_indices, contour_values = pipeline.find_maxima_points(
+        surface,
+        fuel_axis,
+        additive_axis,
+        minimum_line_fit,
+        DiffSurfaceJobConfig(
+            input_path=Path("surface.csv"),
+            surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
+            maxima_detection_method=MaximaDetectionMethod.CONTOUR_LEVELS,
+            contour_levels_text="7, 8",
+        ),
+    )
+
+    assert contour_indices == (7, 8)
+    assert len(contour_values) == 2
+    assert len(left_points) > 0
+    assert len(right_points) > 0
+    assert np.all(np.isfinite(left_points))
+    assert np.all(np.isfinite(right_points))
 
 
 def test_process_job_builds_surface_and_restores_three_lines(tmp_path: Path) -> None:
@@ -165,5 +203,54 @@ def test_process_job_builds_surface_and_restores_three_lines(tmp_path: Path) -> 
     assert np.array_equal(result.left_maxima_points, np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [2.0, 3.0], [3.0, 3.0]]))
     assert np.array_equal(result.right_maxima_points, np.array([[2.0, 0.0], [2.0, 1.0], [3.0, 2.0]]))
     assert np.isfinite(result.minima_line_fit.slope)
+    assert np.isfinite(result.left_line_fit.slope)
+    assert np.isfinite(result.right_line_fit.slope)
+
+
+def test_process_job_supports_contour_level_detection(tmp_path: Path) -> None:
+    input_file = tmp_path / "surface.csv"
+    _write_success_surface_csv(input_file)
+    pipeline = DiffSurfacePipeline()
+    synthetic_surface = np.array(
+        [
+            [9.0, 5.0, 1.0, 5.0],
+            [8.0, 4.0, 0.0, 6.0],
+            [7.0, 3.0, 0.0, 7.0],
+            [6.0, 2.0, 0.0, 8.0],
+        ]
+    )
+
+    def fake_compute_derivatives(
+        component_grid: np.ndarray,
+        additive_axis: np.ndarray,
+        fuel_axis: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        zeros = np.zeros_like(component_grid, dtype=float)
+        return zeros, zeros
+
+    def fake_build_selected_surface(
+        dz_dx: np.ndarray,
+        dz_dy: np.ndarray,
+        surface_mode: SurfaceMode,
+    ) -> np.ndarray:
+        return synthetic_surface
+
+    pipeline.compute_derivatives = fake_compute_derivatives  # type: ignore[method-assign]
+    pipeline.build_selected_surface = fake_build_selected_surface  # type: ignore[method-assign]
+
+    result = pipeline.process_job(
+        DiffSurfaceJobConfig(
+            input_path=input_file,
+            surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
+            maxima_detection_method=MaximaDetectionMethod.CONTOUR_LEVELS,
+            contour_levels_text="7, 8",
+        )
+    )
+
+    assert result.maxima_detection_method is MaximaDetectionMethod.CONTOUR_LEVELS
+    assert result.analysis_contour_indices == (7, 8)
+    assert len(result.analysis_contour_values) == 2
+    assert len(result.left_maxima_points) > 0
+    assert len(result.right_maxima_points) > 0
     assert np.isfinite(result.left_line_fit.slope)
     assert np.isfinite(result.right_line_fit.slope)
