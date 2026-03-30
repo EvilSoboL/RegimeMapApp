@@ -117,7 +117,7 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
     if handles:
         axis.legend(
             loc="lower left",
-            bbox_to_anchor=(0.0, 1.14, 1.0, 0.2),
+            bbox_to_anchor=(-0.2, 1.14, 1.4, 0.2),
             mode="expand",
             borderaxespad=0.0,
             ncol=min(len(handles), 3),
