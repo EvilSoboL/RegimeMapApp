@@ -8,7 +8,7 @@ icon_path = project_root / "src" / "regime_map_app" / "assets" / "app_icon.ico"
 
 
 a = Analysis(
-    ["src/regime_map_app/__main__.py"],
+    ["launcher.py"],
     pathex=[str(project_root), str(project_root / "src")],
     binaries=[],
     datas=[
