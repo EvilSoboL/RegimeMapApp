@@ -117,13 +117,13 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
     if handles:
         axis.legend(
             loc="lower left",
-            bbox_to_anchor=(0.0, 1.02, 1.0, 0.2),
+            bbox_to_anchor=(0.0, 1.14, 1.0, 0.2),
             mode="expand",
             borderaxespad=0.0,
             ncol=min(len(handles), 3),
             prop={"family": result.font_family, "size": result.font_size},
         )
-    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.88))
+    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.8))
     _draw_if_possible(figure)
 
 

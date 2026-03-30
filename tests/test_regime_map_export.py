@@ -114,7 +114,7 @@ def test_render_result_draws_only_requested_lines_and_clips_to_custom_bounds() -
     assert colorbar_axis.yaxis.label.get_fontfamily() == [DEFAULT_FONT_FAMILY]
     assert legend is not None
     bbox = legend.get_bbox_to_anchor().transformed(main_axis.transAxes.inverted())
-    assert bbox.y0 >= 1.0
+    assert bbox.y0 >= 1.1
 
 
 def test_render_result_keeps_automatic_bounds_when_custom_limits_are_disabled() -> None:
