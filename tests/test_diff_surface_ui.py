@@ -144,14 +144,15 @@ def test_diff_surface_background_build_enables_save(qtbot, tmp_path: Path) -> No
     assert "Готово" in widget.status_label.text()
 
 
-def test_main_window_has_three_tabs_and_autofills_dependent_tabs(qtbot, tmp_path: Path) -> None:
+def test_main_window_has_four_tabs_and_autofills_dependent_tabs(qtbot, tmp_path: Path) -> None:
     window = RegimeMapMainWindow()
     qtbot.addWidget(window)
 
-    assert window.tabs.count() == 3
-    assert window.tabs.tabText(0) == "Аппроксимация"
-    assert window.tabs.tabText(1) == "Дифференциальная поверхность"
-    assert window.tabs.tabText(2) == "Режимная карта"
+    assert window.tabs.count() == 4
+    assert window.tabs.tabText(0) == "Экспериментальные данные"
+    assert window.tabs.tabText(1) == "Аппроксимация"
+    assert window.tabs.tabText(2) == "Дифференциальная поверхность"
+    assert window.tabs.tabText(3) == "Режимная карта"
 
     output_path = tmp_path / "approx_surface.csv"
     summary = BatchProcessSummary(

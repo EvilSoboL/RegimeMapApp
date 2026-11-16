@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..csv_help import APPROX_CSV_HELP, csv_source_row
 from .models import ALLOWED_KERNELS, ApproxJobConfig, BatchProcessSummary, InputMode
 from .pipeline import ApproxPipeline
 from .validation import generate_output_filename, validate_job_config
@@ -66,7 +67,7 @@ class ApproxModuleWidget(QWidget):
         self.input_path_edit = QLineEdit()
         self.input_path_edit.setReadOnly(True)
         form_layout.addRow("Выбор:", self.input_path_edit)
-        layout.addLayout(form_layout)
+        layout.addLayout(csv_source_row(form_layout, APPROX_CSV_HELP))
 
         buttons_layout = QHBoxLayout()
         self.select_input_button = QPushButton("Выбрать")
@@ -210,6 +211,14 @@ class ApproxModuleWidget(QWidget):
         self._sync_input_summary()
         self._sync_output_name_preview()
         self.refresh_form_state()
+
+    def load_prepared_csv(self, path: Path) -> bool:
+        if self._busy:
+            return False
+        self.mode_combo.setCurrentIndex(self.mode_combo.findData(InputMode.SINGLE_FILE))
+        self.auto_output_name_checkbox.setChecked(True)
+        self.set_input_paths([path])
+        return True
 
     def set_output_dir(self, path: Path) -> None:
         self.output_dir_edit.setText(str(path))

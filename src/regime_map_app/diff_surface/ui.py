@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..csv_help import GRID_CSV_HELP, csv_source_row
 from .exceptions import DiffSurfaceError
 from .models import (
     DEFAULT_ANALYSIS_CONTOUR_LEVELS,
@@ -80,7 +81,7 @@ class DiffSurfaceModuleWidget(QWidget):
         self.input_path_edit = QLineEdit()
         self.input_path_edit.setReadOnly(True)
         form_layout.addRow("CSV-файл:", self.input_path_edit)
-        layout.addLayout(form_layout)
+        layout.addLayout(csv_source_row(form_layout, GRID_CSV_HELP))
 
         buttons_layout = QHBoxLayout()
         self.select_input_button = QPushButton("Выбрать файл")

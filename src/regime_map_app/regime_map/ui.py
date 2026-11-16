@@ -27,8 +27,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..approx.exceptions import ValidationError as ApproxValidationError
+from ..approx.validation import parse_file_metadata
+from ..csv_help import GRID_CSV_HELP, csv_source_row
 from ..diff_surface.models import DEFAULT_ANALYSIS_CONTOUR_LEVELS, MaximaDetectionMethod
 from ..diff_surface.validation import parse_contour_level_indices
+from ..experimental import COMPONENTS
 from .cmaps import AVAILABLE_CMAP_NAMES, CMAP_REFERENCE_URL, DEFAULT_CMAP_NAME, resolve_cmap_name
 from .exceptions import RegimeMapError
 from .models import (
@@ -55,6 +59,7 @@ class RegimeMapModuleWidget(QWidget):
         self._selected_input_path: Path | None = None
         self._auto_selected_input_path: Path | None = None
         self._manual_selection = False
+        self._component = "CO"
         self._thread: QThread | None = None
         self._worker: RegimeMapWorker | None = None
         self._last_result: RegimeMapResult | None = None
@@ -96,7 +101,7 @@ class RegimeMapModuleWidget(QWidget):
         self.input_path_edit = QLineEdit()
         self.input_path_edit.setReadOnly(True)
         form_layout.addRow("CSV-файл:", self.input_path_edit)
-        layout.addLayout(form_layout)
+        layout.addLayout(csv_source_row(form_layout, GRID_CSV_HELP))
 
         buttons_layout = QHBoxLayout()
         self.select_input_button = QPushButton("Выбрать файл")
@@ -311,9 +316,9 @@ class RegimeMapModuleWidget(QWidget):
     def collect_config(self) -> RegimeMapJobConfig:
         return RegimeMapJobConfig(
             input_path=self._selected_input_path,
-            is_co_component=True,
+            is_co_component=self._component == "CO",
             show_min_line=self.show_min_line_checkbox.isChecked(),
-            show_right_line=self.show_right_line_checkbox.isChecked(),
+            show_right_line=self._component == "CO" and self.show_right_line_checkbox.isChecked(),
             show_mean_line=self.show_mean_line_checkbox.isChecked(),
             use_custom_x_limits=self.use_custom_x_limits_checkbox.isChecked(),
             x_min=self.x_min_spin.value(),
@@ -347,6 +352,17 @@ class RegimeMapModuleWidget(QWidget):
     def set_input_path(self, path: Path, *, user_selected: bool) -> None:
         self._selected_input_path = path
         self.input_path_edit.setText(str(path))
+        try:
+            metadata = parse_file_metadata(Path(path.name.removeprefix("approx_")))
+            component = next(
+                (key for key in COMPONENTS.values() if key.casefold() == metadata.component_name.casefold()), "CO"
+            )
+        except ApproxValidationError:
+            component = "CO"
+        if component != self._component:
+            self._component = component
+            label = next(label for label, key in COMPONENTS.items() if key == component)
+            self.colorbar_label_edit.setText(f"{component}, {'%' if label.startswith('%') else 'ppm'}")
         if user_selected:
             self._manual_selection = True
         else:
@@ -534,9 +550,11 @@ class RegimeMapModuleWidget(QWidget):
         x_enabled = self.use_custom_x_limits_checkbox.isChecked() and not self._busy
         y_enabled = self.use_custom_y_limits_checkbox.isChecked() and not self._busy
         ppm_enabled = self.use_custom_ppm_scale_checkbox.isChecked() and not self._busy
+        right_line_enabled = self._component == "CO" and not self._busy
         right_line_analysis_enabled = (
-            self.show_right_line_checkbox.isChecked() or self.show_mean_line_checkbox.isChecked()
-        ) and not self._busy
+            (right_line_enabled and self.show_right_line_checkbox.isChecked())
+            or (not self._busy and self.show_mean_line_checkbox.isChecked())
+        )
         contour_levels_enabled = (
             right_line_analysis_enabled and self.current_maxima_detection_method().uses_contour_levels
         )
@@ -548,7 +566,7 @@ class RegimeMapModuleWidget(QWidget):
         self.ppm_min_spin.setEnabled(ppm_enabled)
         self.ppm_max_spin.setEnabled(ppm_enabled)
         self.ppm_step_spin.setEnabled(ppm_enabled)
-        self.show_right_line_checkbox.setEnabled(not self._busy)
+        self.show_right_line_checkbox.setEnabled(right_line_enabled)
         self.show_min_line_checkbox.setEnabled(not self._busy)
         self.show_mean_line_checkbox.setEnabled(not self._busy)
         self.use_custom_x_limits_checkbox.setEnabled(not self._busy)
