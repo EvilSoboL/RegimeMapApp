@@ -102,7 +102,12 @@ class ScipyApproximationBackend:
             )
             fuel_grid, additive_grid = np.meshgrid(fuel_axis, additive_axis)
             grid_points = np.column_stack((fuel_grid.ravel(), additive_grid.ravel()))
-            interpolator = RBFInterpolator(points, values, kernel=config.kernel)
+            # RBF distances should depend on relative position along each axis, not its units.
+            origin = points.min(axis=0)
+            spans = np.ptp(points, axis=0)
+            grid_points -= origin
+            grid_points /= spans
+            interpolator = RBFInterpolator((points - origin) / spans, values, kernel=config.kernel)
             component_grid = interpolator(grid_points).reshape(additive_grid.shape)
         except Exception as exc:
             raise ProcessingError(f"Не удалось построить RBF-поверхность: {exc}") from exc

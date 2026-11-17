@@ -10,8 +10,9 @@ pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QLineEdit, QPushButton
 
+from regime_map_app.approx.boundary_dialog import BoundaryPointsDialog
 ApproxModuleWidget = import_module("regime_map_app.approx.ui").ApproxModuleWidget
 InputMode = import_module("regime_map_app.approx.models").InputMode
 CSV_SEPARATOR = import_module("regime_map_app.approx.models").CSV_SEPARATOR
@@ -96,6 +97,40 @@ def test_selecting_folder_sets_output_dir_to_same_folder(qtbot, tmp_path: Path) 
     widget.set_input_paths([input_folder])
 
     assert widget.output_dir_edit.text() == str(input_folder)
+
+
+def test_co_boundary_editor_adds_only_new_points_to_preview_and_approximation(qtbot, monkeypatch, tmp_path: Path) -> None:
+    widget = ApproxModuleWidget()
+    qtbot.addWidget(widget)
+    input_file = tmp_path / "diesel-steam-CO-13-03-2026.csv"
+    _write_valid_csv(input_file)
+    contents = input_file.read_text(encoding="utf-8").replace("1;1;4", "1;1;500")
+    input_file.write_text(contents, encoding="utf-8")
+    widget.load_prepared_csv(input_file)
+    assert not widget.boundary_button.isHidden()
+
+    def fill_boundaries(dialog: BoundaryPointsDialog) -> int:
+        fields = {field.accessibleName(): field for field in dialog.findChildren(QLineEdit)}
+        fields["Правая граница, пар 0"].setText("f40")
+        fields["Правая граница, пар 1"].setText("1")
+        dialog.accept()
+        return dialog.result()
+
+    monkeypatch.setattr(BoundaryPointsDialog, "exec", fill_boundaries)
+    widget.boundary_button.click()
+
+    config = widget.collect_config()
+    assert config.boundary_points == ((1.3812, 0.0, 500.0),)
+    points, source = widget.preview_figure.axes[0].collections
+    assert points.get_offsets().tolist() == [[1.3812, 0]]
+    assert len(source.get_offsets()) == 5
+
+    summary = widget.pipeline.process_job(config)
+    assert summary.succeeded == 1
+    grid = summary.successful_results[0].preview_surface
+    assert grid.fuel_grid[0, -1] == pytest.approx(1.3812)
+    assert grid.component_grid[0, -1] == pytest.approx(500)
+    assert input_file.read_text(encoding="utf-8") == contents
 
 
 def test_input_mode_has_only_file_and_folder_with_single_select_button(qtbot) -> None:

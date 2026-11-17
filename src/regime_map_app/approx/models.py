@@ -62,6 +62,7 @@ class ApproxJobConfig:
     median_size: int = DEFAULT_MEDIAN_SIZE
     clamp_zero: bool = True
     auto_output_name: bool = True
+    boundary_points: tuple[tuple[float, float, float], ...] = ()
 
     @property
     def resolution(self) -> tuple[int, int]:

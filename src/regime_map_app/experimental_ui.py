@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from math import isfinite
 from pathlib import Path
 from re import fullmatch
 
@@ -39,7 +38,9 @@ from .experimental import (
     GasLog,
     PlcLog,
     approximation_csv,
+    fuel_flow_from_frequency,
     read_gas_log,
+    read_number,
     read_plc_log,
 )
 
@@ -62,16 +63,6 @@ class ExperimentPoint:
             return self.overrides[component]
         result = self.averages.get(component)
         return result[0] if result else None
-
-
-def read_number(text: str, label: str) -> float:
-    try:
-        value = float(text.strip().replace(",", "."))
-        if isfinite(value):
-            return value
-    except ValueError:
-        pass
-    raise ValueError(f"Введите число в поле «{label}».")
 
 
 class ExperimentalDataWidget(QWidget):
@@ -343,7 +334,7 @@ class ExperimentalDataWidget(QWidget):
             if manual or self.value_edit.text().strip():
                 overrides[component] = read_number(self.value_edit.text(), "Значение вручную")
             if manual:
-                fuel = round(FUEL_FLOW_INTERCEPT + FUEL_FLOW_PER_FREQUENCY * frequency, 8)
+                fuel = fuel_flow_from_frequency(frequency)
                 point = ExperimentPoint(fuel, frequency, additive, {}, overrides, "", "", 0)
             else:
                 log = self.logs[self.source_combo.currentData()]

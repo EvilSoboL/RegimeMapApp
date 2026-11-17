@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..csv_help import APPROX_CSV_HELP, csv_source_row
+from .boundary_dialog import BoundaryPointsDialog
 from .exceptions import ApproximationError, ValidationError
 from .models import ALLOWED_KERNELS, ApproxJobConfig, BatchProcessSummary, InputMode, SurfaceGrid
 from .pipeline import ApproxPipeline
@@ -45,6 +46,7 @@ class ApproxModuleWidget(QWidget):
         self._worker: ApproxWorker | None = None
         self._last_summary: BatchProcessSummary | None = None
         self._preview_data: np.ndarray | None = None
+        self._boundary_points: tuple[tuple[float, float, float], ...] = ()
         self._busy = False
 
         self._build_ui()
@@ -94,6 +96,9 @@ class ApproxModuleWidget(QWidget):
         self.preview_figure = Figure(layout="constrained")
         self.preview_canvas = FigureCanvasQTAgg(self.preview_figure)
         layout.addWidget(self.preview_label)
+        self.boundary_button = QPushButton("Добавить граничные точки CO…")
+        self.boundary_button.clicked.connect(self._edit_boundaries)
+        layout.addWidget(self.boundary_button)
         layout.addWidget(self.preview_canvas, 1)
         return self.preview_group
 
@@ -101,6 +106,7 @@ class ApproxModuleWidget(QWidget):
         single_file = self.current_input_mode().is_single
         self.preview_group.setVisible(single_file)
         self._preview_data = None
+        self.boundary_button.hide()
         self.preview_figure.clear()
         self.preview_canvas.hide()
         self.preview_label.show()
@@ -125,24 +131,53 @@ class ApproxModuleWidget(QWidget):
             return
 
         self._preview_data = data[valid]
+        self.boundary_button.setVisible(self._preview_component().casefold() == "co")
+        self._update_boundary_button()
         skipped = len(frame) - count
         self.preview_label.setText(f"Точек: {count}" + (f" · Пропущено: {skipped}" if skipped else ""))
         self._draw_preview()
+
+    def _preview_component(self) -> str:
+        try:
+            return parse_file_metadata(self._selected_input_paths[0]).component_name
+        except ValidationError:
+            return "Компонент"
+
+    def _edit_boundaries(self) -> None:
+        if self._preview_data is None or self._busy:
+            return
+        dialog = BoundaryPointsDialog(self._preview_data, self._boundary_points, self)
+        if dialog.exec() and dialog.points != self._boundary_points:
+            self._boundary_points = dialog.points
+            self._update_boundary_button()
+            self._draw_preview()
+
+    def _update_boundary_button(self) -> None:
+        count = len(self._boundary_points)
+        self.boundary_button.setText(
+            f"Изменить граничные точки CO ({count})…" if count else "Добавить граничные точки CO…"
+        )
 
     def _draw_preview(self, surface: SurfaceGrid | None = None) -> None:
         if self._preview_data is None:
             return
 
         fuel, additive, component = self._preview_data.T
-        try:
-            component_label = parse_file_metadata(self._selected_input_paths[0]).component_name
-        except ValidationError:
-            component_label = "Компонент"
+        component_label = self._preview_component()
 
         self.preview_figure.clear()
         axes = self.preview_figure.subplots(1 if surface is None else 2, sharex=True, sharey=True, squeeze=False)[:, 0]
         axis = axes[0]
         norm = Normalize(float(component.min()), float(component.max()))
+        if self._boundary_points:
+            boundary_fuel, boundary_additive, boundary_co = np.asarray(self._boundary_points).T
+            norm.autoscale(np.concatenate((component, boundary_co)))
+            axis.scatter(
+                boundary_fuel, boundary_additive, c=boundary_co, cmap="viridis", norm=norm,
+                marker="D", s=65, edgecolors="0.2", linewidths=0.8,
+                label="Граничные точки, заданные вручную",
+            )
+            axis.legend(loc="best", fontsize="small")
         if surface is not None:
             grid = np.ma.masked_invalid(surface.component_grid, copy=False)
             if grid.count():
@@ -309,9 +344,12 @@ class ApproxModuleWidget(QWidget):
             median_size=self.median_size_spin.value() if self.use_median_filter_checkbox.isChecked() else 0,
             clamp_zero=self.clamp_zero_checkbox.isChecked(),
             auto_output_name=auto_output_name,
+            boundary_points=self._boundary_points if self.current_input_mode().is_single else (),
         )
 
     def set_input_paths(self, paths: list[Path] | tuple[Path, ...]) -> None:
+        if self._selected_input_paths != tuple(paths):
+            self._boundary_points = ()
         self._selected_input_paths = tuple(paths)
         self._sync_output_dir_from_input()
         self._sync_input_summary()
@@ -473,6 +511,7 @@ class ApproxModuleWidget(QWidget):
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
+        self.boundary_button.setEnabled(not busy)
         self.mode_combo.setEnabled(not busy)
         self.select_input_button.setEnabled(not busy)
         self.select_output_dir_button.setEnabled(not busy)

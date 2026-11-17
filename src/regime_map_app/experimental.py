@@ -39,6 +39,10 @@ FUEL_FLOW_INTERCEPT = 0.0472
 FUEL_FLOW_PER_FREQUENCY = 0.03335
 
 
+def fuel_flow_from_frequency(frequency: float) -> float:
+    return round(FUEL_FLOW_INTERCEPT + FUEL_FLOW_PER_FREQUENCY * frequency, 8)
+
+
 def _normalize_header(value: object) -> str:
     return "".join(str(value).translate(HEADER_TRANSLATION).split()).casefold()
 
@@ -51,6 +55,13 @@ def _number(value: object) -> float | None:
     except ValueError:
         return None
     return number if isfinite(number) else None
+
+
+def read_number(text: str, label: str) -> float:
+    number = _number(text)
+    if number is None:
+        raise ValueError(f"Введите число в поле «{label}».")
+    return number
 
 
 @dataclass(frozen=True)

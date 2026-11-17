@@ -3,6 +3,7 @@ from __future__ import annotations
 from importlib import import_module
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 models = import_module("regime_map_app.approx.models")
@@ -56,6 +57,23 @@ def test_process_single_file_creates_output_csv(tmp_path: Path) -> None:
     frame = pd.read_csv(exported_path, sep=CSV_SEPARATOR, engine="python")
     assert list(frame.columns) == ["fuel", "additive", "component"]
     assert len(frame.index) == 20
+
+
+def test_approximation_is_invariant_to_additive_units() -> None:
+    frame = pd.DataFrame(
+        [(0.8, 0.4, 5), (1.0, 0.4, 100), (1.1, 0.8, 12), (1.4, 1.0, 4), (1.5, 1.0, 300)],
+        columns=REQUIRED_COLUMNS,
+    )
+    in_grams = frame.assign(additive=frame["additive"] * 1000)
+    config = ApproxJobConfig(input_mode=InputMode.SINGLE_FILE, input_paths=(), output_dir=None)
+    backend = ApproxPipeline().backend
+
+    original = backend.approximate_surface(frame, config)
+    converted = backend.approximate_surface(in_grams, config)
+
+    np.testing.assert_allclose(converted.component_grid, original.component_grid)
+    np.testing.assert_allclose(converted.fuel_grid, original.fuel_grid)
+    np.testing.assert_allclose(converted.additive_grid, original.additive_grid * 1000)
 
 
 def test_validate_inputs_reports_wrong_delimiter(tmp_path: Path) -> None:
