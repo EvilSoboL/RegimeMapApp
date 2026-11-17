@@ -3,6 +3,7 @@ from __future__ import annotations
 from importlib import import_module
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 pytest.importorskip("PySide6")
@@ -153,6 +154,10 @@ def test_background_processing_updates_progress_and_actions(qtbot, tmp_path: Pat
     _write_valid_csv(input_file)
     widget.set_input_paths([input_file])
     widget.set_output_dir(tmp_path / "out")
+    widget.resolution_x_spin.setValue(7)
+    widget.resolution_y_spin.setValue(5)
+    widget.use_median_filter_checkbox.setChecked(True)
+    widget.median_size_spin.setValue(3)
 
     qtbot.mouseClick(widget.run_button, Qt.LeftButton)
     qtbot.waitUntil(lambda: widget._thread is None, timeout=10_000)
@@ -160,3 +165,14 @@ def test_background_processing_updates_progress_and_actions(qtbot, tmp_path: Pat
     assert widget.progress_bar.value() == 100
     assert widget.open_folder_button.isEnabled()
     assert "Готово" in widget.status_label.text()
+    source_axis, result_axis, colorbar_axis = widget.preview_figure.axes
+    heatmap, = result_axis.images
+    assert heatmap.norm is source_axis.collections[0].norm
+    assert source_axis.get_xlim() == result_axis.get_xlim()
+    assert source_axis.get_ylim() == result_axis.get_ylim()
+    exported = np.loadtxt(tmp_path / "out" / f"approx_{input_file.name}", delimiter=";", skiprows=1)
+    np.testing.assert_allclose(heatmap.get_array(), exported[:, 2].reshape(5, 7))
+    assert colorbar_axis.get_ylabel() == "CO"
+
+    widget.set_input_paths([input_file])
+    assert len(widget.preview_figure.axes) == 2

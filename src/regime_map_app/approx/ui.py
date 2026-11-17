@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from PySide6.QtCore import QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -27,7 +28,7 @@ from PySide6.QtWidgets import (
 
 from ..csv_help import APPROX_CSV_HELP, csv_source_row
 from .exceptions import ApproximationError, ValidationError
-from .models import ALLOWED_KERNELS, ApproxJobConfig, BatchProcessSummary, InputMode
+from .models import ALLOWED_KERNELS, ApproxJobConfig, BatchProcessSummary, InputMode, SurfaceGrid
 from .pipeline import ApproxPipeline
 from .validation import generate_output_filename, parse_file_metadata, validate_job_config
 from .worker import ApproxWorker
@@ -43,6 +44,7 @@ class ApproxModuleWidget(QWidget):
         self._thread: QThread | None = None
         self._worker: ApproxWorker | None = None
         self._last_summary: BatchProcessSummary | None = None
+        self._preview_data: np.ndarray | None = None
         self._busy = False
 
         self._build_ui()
@@ -85,7 +87,7 @@ class ApproxModuleWidget(QWidget):
         return group
 
     def _build_preview_group(self) -> QGroupBox:
-        self.preview_group = QGroupBox("Тепловая карта исходных точек")
+        self.preview_group = QGroupBox("Тепловые карты")
         layout = QVBoxLayout(self.preview_group)
         self.preview_label = QLabel()
         self.preview_label.setWordWrap(True)
@@ -98,6 +100,7 @@ class ApproxModuleWidget(QWidget):
     def _refresh_input_preview(self) -> None:
         single_file = self.current_input_mode().is_single
         self.preview_group.setVisible(single_file)
+        self._preview_data = None
         self.preview_figure.clear()
         self.preview_canvas.hide()
         self.preview_label.show()
@@ -114,30 +117,67 @@ class ApproxModuleWidget(QWidget):
             self.preview_label.setText(str(exc))
             return
 
-        fuel = frame["fuel"].to_numpy(dtype=float)
-        additive = frame["additive"].to_numpy(dtype=float)
-        component = frame["component"].to_numpy(dtype=float)
-        valid = np.isfinite(fuel) & np.isfinite(additive) & np.isfinite(component)
+        data = frame[["fuel", "additive", "component"]].to_numpy(dtype=float)
+        valid = np.isfinite(data).all(axis=1)
         count = int(valid.sum())
         if not count:
             self.preview_label.setText("В CSV нет точек с конечными координатами и значением компонента.")
             return
 
-        try:
-            component_label = parse_file_metadata(path).component_name
-        except ValidationError:
-            component_label = "Компонент"
-        axis = self.preview_figure.add_subplot()
-        points = axis.scatter(
-            fuel[valid], additive[valid], c=component[valid], cmap="viridis",
-            s=52, edgecolors="0.2", linewidths=0.45,
-        )
-        axis.set(xlabel="Расход топлива (fuel)", ylabel="Расход разбавителя (additive)")
-        axis.set_axisbelow(True)
-        axis.grid(alpha=0.2)
-        self.preview_figure.colorbar(points, ax=axis, label=component_label)
+        self._preview_data = data[valid]
         skipped = len(frame) - count
         self.preview_label.setText(f"Точек: {count}" + (f" · Пропущено: {skipped}" if skipped else ""))
+        self._draw_preview()
+
+    def _draw_preview(self, surface: SurfaceGrid | None = None) -> None:
+        if self._preview_data is None:
+            return
+
+        fuel, additive, component = self._preview_data.T
+        try:
+            component_label = parse_file_metadata(self._selected_input_paths[0]).component_name
+        except ValidationError:
+            component_label = "Компонент"
+
+        self.preview_figure.clear()
+        axes = self.preview_figure.subplots(1 if surface is None else 2, sharex=True, sharey=True, squeeze=False)[:, 0]
+        axis = axes[0]
+        norm = Normalize(float(component.min()), float(component.max()))
+        if surface is not None:
+            grid = np.ma.masked_invalid(surface.component_grid, copy=False)
+            if grid.count():
+                norm.vmin = min(norm.vmin, float(grid.min()))
+                norm.vmax = max(norm.vmax, float(grid.max()))
+
+            result_axis = axes[1]
+            rows, columns = grid.shape
+            result_axis.set_title(f"Аппроксимация · {columns} × {rows}")
+            if rows > 1 and columns > 1:
+                x = surface.fuel_grid[0]
+                y = surface.additive_grid[:, 0]
+                dx = (x[1] - x[0]) / 2
+                dy = (y[1] - y[0]) / 2
+                result_axis.imshow(
+                    grid, extent=(x[0] - dx, x[-1] + dx, y[0] - dy, y[-1] + dy),
+                    origin="lower", aspect="auto", interpolation="nearest", cmap="viridis", norm=norm,
+                )
+            else:
+                result_axis.scatter(
+                    surface.fuel_grid.ravel(), surface.additive_grid.ravel(), c=grid.ravel(),
+                    cmap="viridis", norm=norm, marker="s",
+                )
+
+        points = axis.scatter(
+            fuel, additive, c=component, cmap="viridis", norm=norm,
+            s=52, edgecolors="0.2", linewidths=0.45,
+        )
+        axis.set_title("Исходные точки")
+        axis.set_axisbelow(True)
+        axis.grid(alpha=0.2)
+        for plot in axes:
+            plot.set_ylabel("Расход разбавителя")
+        axes[-1].set_xlabel("Расход топлива")
+        self.preview_figure.colorbar(points, ax=list(axes), label=component_label)
         self.preview_canvas.show()
         self.preview_canvas.draw()
 
@@ -465,6 +505,11 @@ class ApproxModuleWidget(QWidget):
         self.append_log(
             f"Итог: обработано {summary.total_files}, успешно {summary.succeeded}, с ошибками {summary.failed}."
         )
+        if self.current_input_mode().is_single:
+            for result in summary.successful_results:
+                if result.preview_surface is not None and self._selected_input_paths == (result.input_path,):
+                    self._draw_preview(result.preview_surface)
+                    break
         if summary.last_output_path is not None:
             self.output_ready.emit(str(summary.last_output_path))
 

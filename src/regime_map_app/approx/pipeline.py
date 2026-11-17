@@ -82,6 +82,7 @@ class ApproxPipeline:
             output_path=output_path,
             output_rows=len(exported.index),
             metadata=metadata,
+            preview_surface=filtered_surface if config.input_mode.is_single else None,
         )
 
     def process_many(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 from pathlib import Path
@@ -84,6 +84,7 @@ class FileProcessResult:
     output_path: Path | None = None
     output_rows: int = 0
     metadata: FileMetadata | None = None
+    preview_surface: SurfaceGrid | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
