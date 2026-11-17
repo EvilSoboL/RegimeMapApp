@@ -60,6 +60,30 @@ def test_selecting_file_sets_output_dir_to_file_parent(qtbot, tmp_path: Path) ->
     assert widget.output_dir_edit.text() == str(tmp_path)
 
 
+def test_source_preview_uses_raw_points_and_clears_for_invalid_csv(qtbot, tmp_path: Path) -> None:
+    widget = ApproxModuleWidget()
+    qtbot.addWidget(widget)
+    input_file = tmp_path / "diesel-steam-CO-13-03-2026.csv"
+    _write_valid_csv(input_file)
+
+    assert widget.load_prepared_csv(input_file)
+    axis, colorbar_axis = widget.preview_figure.axes
+    points, = axis.collections
+    assert points.get_offsets().tolist() == [[0, 0], [0, 1], [1, 0], [1, 1], [0.5, 0.5]]
+    assert points.get_array().tolist() == [1, 2, 3, 4, 2.5]
+    assert colorbar_axis.get_ylabel() == "CO"
+
+    widget.mode_combo.setCurrentIndex(widget.mode_combo.findData(InputMode.FOLDER_BATCH))
+    assert widget.preview_group.isHidden()
+    assert not widget.preview_figure.axes
+
+    invalid_file = tmp_path / "invalid.csv"
+    invalid_file.write_text("fuel;additive;component\n0;0;1\n", encoding="utf-8")
+    assert widget.load_prepared_csv(invalid_file)
+    assert widget.preview_canvas.isHidden()
+    assert "недостаточно точек" in widget.preview_label.text()
+
+
 def test_selecting_folder_sets_output_dir_to_same_folder(qtbot, tmp_path: Path) -> None:
     widget = ApproxModuleWidget()
     qtbot.addWidget(widget)

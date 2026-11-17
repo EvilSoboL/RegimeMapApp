@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
 from PySide6.QtCore import QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -23,9 +26,10 @@ from PySide6.QtWidgets import (
 )
 
 from ..csv_help import APPROX_CSV_HELP, csv_source_row
+from .exceptions import ApproximationError, ValidationError
 from .models import ALLOWED_KERNELS, ApproxJobConfig, BatchProcessSummary, InputMode
 from .pipeline import ApproxPipeline
-from .validation import generate_output_filename, validate_job_config
+from .validation import generate_output_filename, parse_file_metadata, validate_job_config
 from .worker import ApproxWorker
 
 
@@ -49,10 +53,15 @@ class ApproxModuleWidget(QWidget):
     def _build_ui(self) -> None:
         root_layout = QVBoxLayout(self)
         root_layout.addWidget(self._build_input_group())
-        root_layout.addWidget(self._build_output_group())
-        root_layout.addWidget(self._build_parameters_group())
-        root_layout.addWidget(self._build_actions_group())
-        root_layout.addWidget(self._build_info_group())
+        content_layout = QHBoxLayout()
+        controls = QVBoxLayout()
+        controls.addWidget(self._build_output_group())
+        controls.addWidget(self._build_parameters_group())
+        controls.addWidget(self._build_actions_group())
+        controls.addWidget(self._build_info_group(), 1)
+        content_layout.addLayout(controls, 1)
+        content_layout.addWidget(self._build_preview_group(), 1)
+        root_layout.addLayout(content_layout, 1)
 
     def _build_input_group(self) -> QGroupBox:
         group = QGroupBox("Источник данных")
@@ -74,6 +83,63 @@ class ApproxModuleWidget(QWidget):
         buttons_layout.addWidget(self.select_input_button)
         layout.addLayout(buttons_layout)
         return group
+
+    def _build_preview_group(self) -> QGroupBox:
+        self.preview_group = QGroupBox("Тепловая карта исходных точек")
+        layout = QVBoxLayout(self.preview_group)
+        self.preview_label = QLabel()
+        self.preview_label.setWordWrap(True)
+        self.preview_figure = Figure(layout="constrained")
+        self.preview_canvas = FigureCanvasQTAgg(self.preview_figure)
+        layout.addWidget(self.preview_label)
+        layout.addWidget(self.preview_canvas, 1)
+        return self.preview_group
+
+    def _refresh_input_preview(self) -> None:
+        single_file = self.current_input_mode().is_single
+        self.preview_group.setVisible(single_file)
+        self.preview_figure.clear()
+        self.preview_canvas.hide()
+        self.preview_label.show()
+        self.preview_label.setText("Выберите CSV с исходными точками.")
+        if not single_file or not self._selected_input_paths:
+            return
+
+        path = self._selected_input_paths[0]
+        if path.is_dir():
+            return
+        try:
+            frame = self.pipeline.backend.read_dataset(path)
+        except ApproximationError as exc:
+            self.preview_label.setText(str(exc))
+            return
+
+        fuel = frame["fuel"].to_numpy(dtype=float)
+        additive = frame["additive"].to_numpy(dtype=float)
+        component = frame["component"].to_numpy(dtype=float)
+        valid = np.isfinite(fuel) & np.isfinite(additive) & np.isfinite(component)
+        count = int(valid.sum())
+        if not count:
+            self.preview_label.setText("В CSV нет точек с конечными координатами и значением компонента.")
+            return
+
+        try:
+            component_label = parse_file_metadata(path).component_name
+        except ValidationError:
+            component_label = "Компонент"
+        axis = self.preview_figure.add_subplot()
+        points = axis.scatter(
+            fuel[valid], additive[valid], c=component[valid], cmap="viridis",
+            s=52, edgecolors="0.2", linewidths=0.45,
+        )
+        axis.set(xlabel="Расход топлива (fuel)", ylabel="Расход разбавителя (additive)")
+        axis.set_axisbelow(True)
+        axis.grid(alpha=0.2)
+        self.preview_figure.colorbar(points, ax=axis, label=component_label)
+        skipped = len(frame) - count
+        self.preview_label.setText(f"Точек: {count}" + (f" · Пропущено: {skipped}" if skipped else ""))
+        self.preview_canvas.show()
+        self.preview_canvas.draw()
 
     def _build_output_group(self) -> QGroupBox:
         group = QGroupBox("Сохранение результата")
@@ -210,6 +276,7 @@ class ApproxModuleWidget(QWidget):
         self._sync_output_dir_from_input()
         self._sync_input_summary()
         self._sync_output_name_preview()
+        self._refresh_input_preview()
         self.refresh_form_state()
 
     def load_prepared_csv(self, path: Path) -> bool:
@@ -352,6 +419,7 @@ class ApproxModuleWidget(QWidget):
         self._sync_output_name_preview()
         self._update_output_name_state()
         self._update_median_filter_state()
+        self._refresh_input_preview()
 
     def _update_output_name_state(self) -> None:
         mode = self.current_input_mode()
