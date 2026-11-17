@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
 from pathlib import Path
+from re import fullmatch
 
-from PySide6.QtCore import QDate, QDateTime, Qt, Signal
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDateEdit,
-    QDateTimeEdit,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -31,6 +31,8 @@ from .approx.exceptions import ValidationError
 from .approx.validation import parse_file_metadata
 from .experimental import (
     COMPONENTS,
+    FUEL_FLOW_INTERCEPT,
+    FUEL_FLOW_PER_FREQUENCY,
     PLC_ANALOG,
     PLC_FUEL,
     PLC_WATER,
@@ -45,6 +47,7 @@ from .experimental import (
 @dataclass
 class ExperimentPoint:
     fuel: float
+    frequency: float
     additive: float
     averages: dict[str, tuple[float, int]]
     overrides: dict[str, float]
@@ -86,9 +89,9 @@ class ExperimentalDataWidget(QWidget):
         form_row.addWidget(self._build_export_form(), 1)
         layout.addLayout(form_row)
 
-        self.points_table = QTableWidget(0, 7)
+        self.points_table = QTableWidget(0, 8)
         self.points_table.setHorizontalHeaderLabels(
-            ["Топливо (fuel)", "Разбавитель (additive)", "Компонент", "Записей", "Файл", "Интервал", "Данные ПЛК"]
+            ["Топливо (fuel)", "Разбавитель (additive)", "Компонент", "Записей", "Файл", "Интервал", "Данные ПЛК", "f"]
         )
         self.points_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.points_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -131,8 +134,17 @@ class ExperimentalDataWidget(QWidget):
 
         self.coverage_label = QLabel()
         form.addRow("Запись", self.coverage_label)
-        self.start_edit = QDateTimeEdit()
-        self.start_edit.setDisplayFormat("dd.MM.yyyy HH:mm:ss")
+        self.start_date_edit = QDateEdit()
+        self.start_date_edit.setDisplayFormat("dd.MM.yyyy")
+        self.start_date_edit.setCalendarPopup(True)
+        self.start_date_edit.setAccessibleName("Дата начала режима")
+        self.start_time_edit = QLineEdit()
+        self.start_time_edit.setAccessibleName("Время начала режима")
+        self.start_time_edit.setPlaceholderText("ЧЧ:ММ или ЧЧ:ММ:СС")
+        self.start_time_edit.setToolTip("Например, 16:09 или 16:09:13. Если секунды пропущены, используются 00.")
+        start_fields = QHBoxLayout()
+        start_fields.addWidget(self.start_date_edit)
+        start_fields.addWidget(self.start_time_edit, 1)
         self.duration_spin = QSpinBox()
         self.duration_spin.setRange(1, 86400)
         self.duration_spin.setValue(180)
@@ -145,21 +157,28 @@ class ExperimentalDataWidget(QWidget):
         averaging = QHBoxLayout()
         averaging.addWidget(self.average_mode, 1)
         averaging.addWidget(self.tail_spin)
-        form.addRow("Начало режима", self.start_edit)
+        form.addRow("Начало режима", start_fields)
         form.addRow("Длительность", self.duration_spin)
         form.addRow("Усреднение", averaging)
 
+        self.frequency_edit = QLineEdit()
+        self.frequency_edit.setPlaceholderText("Например, f32 или 32")
         self.fuel_edit = QLineEdit()
         self.additive_edit = QLineEdit()
         self.value_edit = QLineEdit()
         self.value_edit.setPlaceholderText("Оставьте пустым для усреднения")
-        form.addRow("Топливо (fuel)", self.fuel_edit)
+        form.addRow("Частота форсунки (f)", self.frequency_edit)
+        form.addRow("Топливо для режима (fuel)", self.fuel_edit)
         form.addRow("Разбавитель (additive)", self.additive_edit)
         form.addRow("Значение вручную", self.value_edit)
 
         buttons = QHBoxLayout()
         self.add_regime_button = QPushButton("Добавить режим")
-        manual_button = QPushButton("Добавить ручную точку")
+        manual_button = QPushButton("Добавить точку без времени")
+        manual_button.setToolTip(
+            f"Расход в кг/ч = {FUEL_FLOW_INTERCEPT:g} + {FUEL_FLOW_PER_FREQUENCY:g} × f. "
+            "Диапазон исходных замеров: f21–f43."
+        )
         buttons.addWidget(self.add_regime_button)
         buttons.addWidget(manual_button)
         form.addRow(buttons)
@@ -280,15 +299,31 @@ class ExperimentalDataWidget(QWidget):
 
     def _select_source(self) -> None:
         log = self.logs.get(self.source_combo.currentData())
-        for control in (self.start_edit, self.duration_spin, self.average_mode, self.tail_spin, self.add_regime_button):
+        controls = (self.start_time_edit, self.duration_spin, self.average_mode, self.tail_spin, self.add_regime_button)
+        for control in controls:
             control.setEnabled(log is not None)
         if log is None:
+            self.start_date_edit.setEnabled(False)
             self.coverage_label.setText("Добавьте один или несколько файлов XLSX")
             return
         first, last = log.times[0], log.times[-1]
         self.coverage_label.setText(f"{first:%d.%m.%Y %H:%M:%S} — {last:%d.%m.%Y %H:%M:%S}")
-        self.start_edit.setDateTimeRange(QDateTime(first), QDateTime(last))
-        self.start_edit.setDateTime(QDateTime(first))
+        self.start_date_edit.setDateRange(QDate(first.date()), QDate(last.date()))
+        self.start_date_edit.setDate(QDate(first.date()))
+        self.start_date_edit.setEnabled(first.date() != last.date())
+        self.start_time_edit.setText(f"{first:%H:%M:%S}")
+
+    def _read_regime_start(self) -> datetime:
+        value = self.start_time_edit.text().strip()
+        if fullmatch(r"[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?", value):
+            try:
+                start_time = datetime.strptime(value, "%H:%M:%S" if value.count(":") == 2 else "%H:%M").time()
+                return datetime.combine(self.start_date_edit.date().toPython(), start_time)
+            except ValueError:
+                pass
+        self.start_time_edit.setFocus()
+        self.start_time_edit.selectAll()
+        raise ValueError("Введите время начала в формате ЧЧ:ММ или ЧЧ:ММ:СС, например 16:09 или 16:09:13.")
 
     def _add_regime(self) -> None:
         self._add_point(manual=False)
@@ -298,17 +333,21 @@ class ExperimentalDataWidget(QWidget):
 
     def _add_point(self, *, manual: bool) -> None:
         try:
+            frequency_text = self.frequency_edit.text().strip().lower().removeprefix("f")
+            frequency = read_number(frequency_text, "Частота форсунки (f)")
+            if frequency <= 0:
+                raise ValueError("Частота форсунки (f) должна быть больше нуля.")
             additive = read_number(self.additive_edit.text(), "Разбавитель (additive)")
             component = self.component_combo.currentData()
             overrides = {}
             if manual or self.value_edit.text().strip():
                 overrides[component] = read_number(self.value_edit.text(), "Значение вручную")
             if manual:
-                fuel = read_number(self.fuel_edit.text(), "Топливо (fuel)")
-                point = ExperimentPoint(fuel, additive, {}, overrides, "", "", 0)
+                fuel = round(FUEL_FLOW_INTERCEPT + FUEL_FLOW_PER_FREQUENCY * frequency, 8)
+                point = ExperimentPoint(fuel, frequency, additive, {}, overrides, "", "", 0)
             else:
                 log = self.logs[self.source_combo.currentData()]
-                start: datetime = self.start_edit.dateTime().toPython().replace(tzinfo=None)
+                start = self._read_regime_start()
                 duration = self.duration_spin.value()
                 tail = self.tail_spin.value()
                 records = tail if self.average_mode.currentIndex() == 1 else None
@@ -343,7 +382,8 @@ class ExperimentalDataWidget(QWidget):
                 else:
                     fuel = read_number(self.fuel_edit.text(), "Топливо (fuel)")
                 point = ExperimentPoint(
-                    fuel, additive, averages, overrides, log.path.name, f"{start:%d.%m %H:%M:%S}, {duration} с", count,
+                    fuel, frequency, additive, averages, overrides, log.path.name,
+                    f"{start:%d.%m %H:%M:%S}, {duration} с", count,
                     plc_summary, plc_details,
                 )
         except ValueError as exc:
@@ -369,7 +409,7 @@ class ExperimentalDataWidget(QWidget):
             cells = (
                 f"{point.fuel:.8g}", f"{point.additive:.8g}", value_label,
                 f"{count} из {point.record_count}" if point.record_count else "—",
-                point.source or "Ручная точка", point.interval, point.plc_summary,
+                point.source or "Расход по f", point.interval, point.plc_summary, f"{point.frequency:.8g}",
             )
             for column, label in enumerate(cells):
                 item = QTableWidgetItem(label)

@@ -34,6 +34,10 @@ PLC_WATER = "Water_mass_scale_1/avMass"
 PLC_ANALOG = "PLC_PRG/rAIN4"
 PLC_CHANNELS = (PLC_FUEL, PLC_WATER, PLC_ANALOG)
 
+# Linear fit to the fuel-scale mass slopes from the 09.11.2026 run (f21–f43).
+FUEL_FLOW_INTERCEPT = 0.0472
+FUEL_FLOW_PER_FREQUENCY = 0.03335
+
 
 def _normalize_header(value: object) -> str:
     return "".join(str(value).translate(HEADER_TRANSLATION).split()).casefold()
