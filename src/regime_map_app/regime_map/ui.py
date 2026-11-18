@@ -46,7 +46,7 @@ from .models import (
     RegimeMapJobConfig,
     RegimeMapResult,
 )
-from .pipeline import RegimeMapPipeline
+from .pipeline import CO_MINIMUM_TOLERANCE, RegimeMapPipeline
 from .validation import resolve_export_path, validate_job_config
 from .visualization import create_figure, render_placeholder, render_result, save_plot
 from .worker import RegimeMapWorker
@@ -501,17 +501,10 @@ class RegimeMapModuleWidget(QWidget):
             )
             self.append_log(f"Использованы линии уровня: {contour_details}.")
         if result.show_min_line:
-            self.append_log(
-                f"Построение завершено. Линия минимальной концентрации: a={result.minima_line_fit.slope:.6g}, b={result.minima_line_fit.intercept:.6g}."
-            )
-        if result.show_right_line:
-            self.append_log(
-                f"Правая линия максимумов: a={result.right_line_fit.slope:.6g}, b={result.right_line_fit.intercept:.6g}."
-            )
-        if result.show_mean_line:
-            self.append_log(
-                f"Средняя линия: a={result.mean_line_fit.slope:.6g}, b={result.mean_line_fit.intercept:.6g}."
-            )
+            message = "Линия минимальной концентрации построена по сечениям при постоянном расходе пара."
+            if result.is_co_component:
+                message += f" Допуск к минимуму в сечении: {CO_MINIMUM_TOLERANCE:g} ppm."
+            self.append_log(message)
         self.save_button.setEnabled(True)
 
     def _on_failed(self, message: str) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from ..diff_surface.models import DEFAULT_ANALYSIS_CONTOUR_LEVELS, LineFit, MaximaDetectionMethod
+from ..diff_surface.models import DEFAULT_ANALYSIS_CONTOUR_LEVELS, MaximaDetectionMethod
 from .cmaps import DEFAULT_CMAP_NAME
 
 DEFAULT_CO_LEVELS = np.arange(0.0, 201.0, 25.0, dtype=float)
@@ -68,9 +68,9 @@ class RegimeMapResult:
     show_min_line: bool
     show_right_line: bool
     show_mean_line: bool
-    minima_line_fit: LineFit
-    right_line_fit: LineFit
-    mean_line_fit: LineFit
+    minima_points: NDArray
+    right_points: NDArray
+    mean_points: NDArray
     x_axis_label: str = DEFAULT_X_AXIS_LABEL
     y_axis_label: str = DEFAULT_Y_AXIS_LABEL
     colorbar_label: str = CO_COMPONENT_LABEL

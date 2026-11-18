@@ -11,13 +11,11 @@ pytest.importorskip("matplotlib")
 regime_models = import_module("regime_map_app.regime_map.models")
 regime_validation = import_module("regime_map_app.regime_map.validation")
 regime_visualization = import_module("regime_map_app.regime_map.visualization")
-diff_models = import_module("regime_map_app.diff_surface.models")
 
 CO_COMPONENT_LABEL = regime_models.CO_COMPONENT_LABEL
 DEFAULT_FONT_FAMILY = regime_models.DEFAULT_FONT_FAMILY
 GENERIC_COMPONENT_LABEL = regime_models.GENERIC_COMPONENT_LABEL
 RegimeMapResult = regime_models.RegimeMapResult
-LineFit = diff_models.LineFit
 create_figure = regime_visualization.create_figure
 render_result = regime_visualization.render_result
 resolve_export_path = regime_validation.resolve_export_path
@@ -44,9 +42,9 @@ def _build_custom_result(input_path: Path) -> RegimeMapResult:
         show_min_line=True,
         show_right_line=False,
         show_mean_line=True,
-        minima_line_fit=LineFit(slope=1.0, intercept=0.0),
-        right_line_fit=LineFit(slope=-0.5, intercept=1.25),
-        mean_line_fit=LineFit(slope=0.25, intercept=0.625),
+        minima_points=np.array([[0.5, 0.4], [0.8, 0.8], [1.0, 1.2]]),
+        right_points=np.array([[1.0, 0.4], [1.2, 0.8], [1.5, 1.2]]),
+        mean_points=np.array([[0.75, 0.4], [1.0, 0.8], [1.25, 1.2]]),
         cmap_name="plasma",
     )
 
@@ -71,9 +69,9 @@ def _build_auto_result(input_path: Path) -> RegimeMapResult:
         show_min_line=False,
         show_right_line=True,
         show_mean_line=False,
-        minima_line_fit=LineFit(slope=1.0, intercept=0.0),
-        right_line_fit=LineFit(slope=-0.5, intercept=1.25),
-        mean_line_fit=LineFit(slope=0.25, intercept=0.625),
+        minima_points=np.array([[0.5, 0.4], [0.8, 0.8], [1.0, 1.2]]),
+        right_points=np.array([[1.0, 0.4], [1.2, 0.8], [1.5, 1.2]]),
+        mean_points=np.array([[0.75, 0.4], [1.0, 0.8], [1.25, 1.2]]),
     )
 
 
@@ -107,10 +105,10 @@ def test_render_result_draws_only_requested_lines_and_clips_to_custom_bounds() -
     legend = main_axis.get_legend()
 
     assert len(main_axis.lines) == 2
-    assert np.allclose(minima_line.get_xdata(), np.array([0.7, 1.0]))
-    assert np.allclose(minima_line.get_ydata(), np.array([0.7, 1.0]))
-    assert np.allclose(mean_line.get_xdata(), np.array([0.7, 1.3]))
-    assert np.allclose(mean_line.get_ydata(), np.array([0.8, 0.95]))
+    assert np.allclose(minima_line.get_xdata(), np.array([0.5, 0.8, 1.0]))
+    assert np.allclose(minima_line.get_ydata(), np.array([0.4, 0.8, 1.2]))
+    assert np.allclose(mean_line.get_xdata(), np.array([0.75, 1.0, 1.25]))
+    assert np.allclose(mean_line.get_ydata(), np.array([0.4, 0.8, 1.2]))
     assert main_axis.get_xlim() == pytest.approx((0.7, 1.3))
     assert main_axis.get_ylim() == pytest.approx((0.6, 1.0))
     assert main_axis.get_xlabel() == "Расход топлива, кг/ч"
@@ -138,7 +136,7 @@ def test_render_result_keeps_automatic_bounds_when_custom_limits_are_disabled() 
     right_line = main_axis.lines[0]
 
     assert len(main_axis.lines) == 1
-    assert np.allclose(right_line.get_xdata(), np.array([0.5, 1.5]))
-    assert np.allclose(right_line.get_ydata(), np.array([1.0, 0.5]))
+    assert np.allclose(right_line.get_xdata(), np.array([1.0, 1.2, 1.5]))
+    assert np.allclose(right_line.get_ydata(), np.array([0.4, 0.8, 1.2]))
     assert main_axis.get_xlim() == pytest.approx((0.5, 1.5))
     assert main_axis.get_ylim() == pytest.approx((0.4, 1.2))

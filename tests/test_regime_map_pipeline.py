@@ -18,11 +18,9 @@ GENERIC_COMPONENT_LABEL = regime_models.GENERIC_COMPONENT_LABEL
 RegimeMapJobConfig = regime_models.RegimeMapJobConfig
 RegimeMapPipeline = regime_pipeline_module.RegimeMapPipeline
 DEFAULT_ANALYSIS_CONTOUR_LEVELS = diff_models.DEFAULT_ANALYSIS_CONTOUR_LEVELS
-DifferentialSurfaceResult = diff_models.DifferentialSurfaceResult
 DiffSurfaceValidationResult = diff_models.ValidationResult
-LineFit = diff_models.LineFit
+DiffSurfacePipeline = regime_pipeline_module.DiffSurfacePipeline
 MaximaDetectionMethod = diff_models.MaximaDetectionMethod
-SurfaceMode = diff_models.SurfaceMode
 
 
 def _write_success_surface_csv(path: Path) -> None:
@@ -53,25 +51,14 @@ def _write_success_surface_csv(path: Path) -> None:
     )
 
 
-class StubDiffPipeline:
-    def __init__(self, result: DifferentialSurfaceResult) -> None:
-        self.result = result
-        self.validated_config = None
-        self.processed_config = None
+class StubDiffPipeline(DiffSurfacePipeline):
+    def resolve_contour_level_values(self, _surface, indices):
+        assert indices == (3, 4)
+        return 0.25, 0.5
 
-    def validate_inputs(self, config):
-        self.validated_config = config
-        return DiffSurfaceValidationResult(is_valid=True, errors=(), checked_points=16)
-
-    def read_dataset(self, _path):
-        return object()
-
-    def build_regular_grid(self, _frame):
-        return self.result.fuel_axis, self.result.additive_axis, self.result.component_grid
-
-    def process_job(self, config, **_kwargs):
-        self.processed_config = config
-        return self.result
+    def extract_contour_points(self, _surface, _fuel, _additive, values):
+        assert values == (0.25, 0.5)
+        return np.array([[2.0, 0.0], [2.5, 1.0], [3.0, 2.0]])
 
 
 class NoLineStubDiffPipeline:
@@ -98,34 +85,6 @@ class NoLineStubDiffPipeline:
         raise AssertionError(f"process_job must not be called when all line checkboxes are disabled: {config}")
 
 
-def _build_diff_result(
-    input_path: Path,
-    *,
-    maxima_detection_method: MaximaDetectionMethod = MaximaDetectionMethod.ROW_PEAKS,
-    analysis_contour_indices: tuple[int, ...] = (),
-    analysis_contour_values: tuple[float, ...] = (),
-) -> DifferentialSurfaceResult:
-    return DifferentialSurfaceResult(
-        input_path=input_path,
-        surface_mode=SurfaceMode.GRADIENT_MAGNITUDE,
-        fuel_axis=np.array([0.0, 1.0, 2.0]),
-        additive_axis=np.array([0.0, 1.0, 2.0]),
-        component_grid=np.array([[0.0, 10.0, 20.0], [5.0, 0.0, 25.0], [10.0, 5.0, 0.0]]),
-        dz_dx=np.zeros((3, 3), dtype=float),
-        dz_dy=np.zeros((3, 3), dtype=float),
-        selected_surface=np.ones((3, 3), dtype=float),
-        minima_points=np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]]),
-        minima_line_fit=LineFit(slope=1.0, intercept=0.1),
-        left_maxima_points=np.array([[0.0, 0.0], [1.0, 1.0]]),
-        right_maxima_points=np.array([[1.0, 0.8], [2.0, 0.6]]),
-        left_line_fit=LineFit(slope=1.1, intercept=0.0),
-        right_line_fit=LineFit(slope=-0.2, intercept=1.0),
-        maxima_detection_method=maxima_detection_method,
-        analysis_contour_indices=analysis_contour_indices,
-        analysis_contour_values=analysis_contour_values,
-    )
-
-
 def test_validate_inputs_reuses_diff_surface_csv_rules(tmp_path: Path) -> None:
     input_file = tmp_path / "surface.csv"
     input_file.write_text("fuel,additive,component\n0,0,1\n", encoding="utf-8")
@@ -134,6 +93,29 @@ def test_validate_inputs_reuses_diff_surface_csv_rules(tmp_path: Path) -> None:
 
     assert not validation.is_valid
     assert any("разделитель" in error.lower() for error in validation.errors)
+
+
+def test_minimum_path_follows_bent_valley_and_breaks_at_separate_valley(tmp_path: Path) -> None:
+    input_file = tmp_path / "surface.csv"
+    grid = [
+        [80, 10, 15, 80, 80],
+        [80, 15, 10, 80, 80],
+        [80, 14, 10, 80, 80],
+        [80, 10, 15, 80, 80],
+        [80, 80, 80, 80, 10],
+    ]
+    rows = ["fuel;additive;component"]
+    rows.extend(f"{x};{y};{value}" for y, row in enumerate(grid) for x, value in enumerate(row))
+    input_file.write_text("\n".join(rows), encoding="utf-8")
+
+    result = RegimeMapPipeline().process_job(RegimeMapJobConfig(input_path=input_file, show_min_line=True))
+
+    assert np.isnan(result.minima_points[4]).all()
+    points = result.minima_points[np.isfinite(result.minima_points[:, 0])]
+    assert points[:, 1] == pytest.approx(np.arange(5))
+    for x, y in points:
+        assert grid[int(y)][int(x)] <= min(grid[int(y)]) + 10
+    assert points[-1, 0] == 4
 
 
 def test_validate_inputs_ignores_contour_settings_without_right_line_analysis(tmp_path: Path) -> None:
@@ -155,11 +137,10 @@ def test_validate_inputs_ignores_contour_settings_without_right_line_analysis(tm
     assert stub_diff_pipeline.validated_config.contour_levels_text == ""
 
 
-def test_process_job_uses_diff_surface_result_with_auto_ranges_and_non_co_overlay_rules(tmp_path: Path) -> None:
+def test_process_job_uses_slice_paths_with_auto_ranges_and_non_co_overlay_rules(tmp_path: Path) -> None:
     input_file = tmp_path / "surface.csv"
     _write_success_surface_csv(input_file)
-    stub_diff_pipeline = StubDiffPipeline(_build_diff_result(input_file))
-    pipeline = RegimeMapPipeline(diff_pipeline=stub_diff_pipeline)
+    pipeline = RegimeMapPipeline()
 
     result = pipeline.process_job(
         RegimeMapJobConfig(
@@ -171,8 +152,6 @@ def test_process_job_uses_diff_surface_result_with_auto_ranges_and_non_co_overla
         )
     )
 
-    assert stub_diff_pipeline.processed_config.input_path == input_file
-    assert stub_diff_pipeline.processed_config.surface_mode is SurfaceMode.GRADIENT_MAGNITUDE
     assert result.component_label == GENERIC_COMPONENT_LABEL
     assert result.co_levels == AUTO_CONTOUR_LEVELS
     assert result.x_limits is None
@@ -180,8 +159,12 @@ def test_process_job_uses_diff_surface_result_with_auto_ranges_and_non_co_overla
     assert result.show_min_line is True
     assert result.show_right_line is False
     assert result.show_mean_line is True
-    assert result.mean_line_fit.slope == pytest.approx(0.4)
-    assert result.mean_line_fit.intercept == pytest.approx(0.55)
+    valid = np.isfinite(result.right_points[:, 0])
+    assert valid.any()
+    assert result.minima_points[np.isfinite(result.minima_points[:, 0]), 0] == pytest.approx([0, 1, 2, 3])
+    assert result.mean_points[valid, 0] == pytest.approx(
+        (result.minima_points[valid, 0] + result.right_points[valid, 0]) / 2
+    )
 
 
 def test_process_job_builds_map_without_line_calculations_when_checkboxes_are_disabled(tmp_path: Path) -> None:
@@ -212,16 +195,7 @@ def test_process_job_builds_map_without_line_calculations_when_checkboxes_are_di
 def test_process_job_supports_custom_ranges_ppm_scale_and_contour_based_right_line(tmp_path: Path) -> None:
     input_file = tmp_path / "surface.csv"
     _write_success_surface_csv(input_file)
-    stub_diff_pipeline = StubDiffPipeline(
-        _build_diff_result(
-            input_file,
-            maxima_detection_method=MaximaDetectionMethod.CONTOUR_LEVELS,
-            analysis_contour_indices=(3, 4),
-            analysis_contour_values=(0.25, 0.5),
-        )
-    )
-    pipeline = RegimeMapPipeline(diff_pipeline=stub_diff_pipeline)
-
+    pipeline = RegimeMapPipeline(diff_pipeline=StubDiffPipeline())
     result = pipeline.process_job(
         RegimeMapJobConfig(
             input_path=input_file,
@@ -249,8 +223,6 @@ def test_process_job_supports_custom_ranges_ppm_scale_and_contour_based_right_li
         )
     )
 
-    assert stub_diff_pipeline.processed_config.maxima_detection_method is MaximaDetectionMethod.CONTOUR_LEVELS
-    assert stub_diff_pipeline.processed_config.contour_levels_text == "3, 4"
     assert result.component_label == CO_COMPONENT_LABEL
     assert np.array_equal(result.co_levels, np.arange(0.0, 201.0, 25.0))
     assert result.x_limits == pytest.approx((0.7, 1.3))
@@ -270,8 +242,7 @@ def test_process_job_supports_custom_ranges_ppm_scale_and_contour_based_right_li
 def test_process_job_uses_default_cmap_when_value_is_blank(tmp_path: Path) -> None:
     input_file = tmp_path / "surface.csv"
     _write_success_surface_csv(input_file)
-    stub_diff_pipeline = StubDiffPipeline(_build_diff_result(input_file))
-    pipeline = RegimeMapPipeline(diff_pipeline=stub_diff_pipeline)
+    pipeline = RegimeMapPipeline()
 
     result = pipeline.process_job(
         RegimeMapJobConfig(
