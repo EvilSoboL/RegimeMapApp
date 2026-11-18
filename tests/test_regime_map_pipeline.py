@@ -95,7 +95,7 @@ def test_validate_inputs_reuses_diff_surface_csv_rules(tmp_path: Path) -> None:
     assert any("разделитель" in error.lower() for error in validation.errors)
 
 
-def test_minimum_path_follows_bent_valley_and_breaks_at_separate_valley(tmp_path: Path) -> None:
+def test_minimum_line_fits_a_straight_line_to_the_bent_valley(tmp_path: Path) -> None:
     input_file = tmp_path / "surface.csv"
     grid = [
         [80, 10, 15, 80, 80],
@@ -108,14 +108,13 @@ def test_minimum_path_follows_bent_valley_and_breaks_at_separate_valley(tmp_path
     rows.extend(f"{x};{y};{value}" for y, row in enumerate(grid) for x, value in enumerate(row))
     input_file.write_text("\n".join(rows), encoding="utf-8")
 
-    result = RegimeMapPipeline().process_job(RegimeMapJobConfig(input_path=input_file, show_min_line=True))
+    pipeline = RegimeMapPipeline()
+    result = pipeline.process_job(RegimeMapJobConfig(input_path=input_file, show_min_line=True))
+    valley_fuel = pipeline.find_minimum_path(result.component_grid, result.fuel_axis, 10.0)
 
-    assert np.isnan(result.minima_points[4]).all()
-    points = result.minima_points[np.isfinite(result.minima_points[:, 0])]
-    assert points[:, 1] == pytest.approx(np.arange(5))
-    for x, y in points:
-        assert grid[int(y)][int(x)] <= min(grid[int(y)]) + 10
-    assert points[-1, 0] == 4
+    assert result.minima_points[:, 1] == pytest.approx(np.arange(5))
+    assert valley_fuel == pytest.approx([1, 1, 1, 2, 4])
+    assert result.minima_points[:, 0] == pytest.approx([0.4, 1.1, 1.8, 2.5, 3.2])
 
 
 def test_validate_inputs_ignores_contour_settings_without_right_line_analysis(tmp_path: Path) -> None:

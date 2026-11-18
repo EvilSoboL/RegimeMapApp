@@ -86,18 +86,26 @@ class RegimeMapPipeline:
             )
             if needs_min_line:
                 tolerance = CO_MINIMUM_TOLERANCE if config.is_co_component else 0.0
-                minimum_fuel, breaks = self.find_minimum_path(
+                valley_fuel = self.find_minimum_path(
                     component_grid, fuel_axis, tolerance, should_cancel,
                 )
-                minima_points = self._path_points(minimum_fuel, additive_axis, breaks)
+                fit = self.diff_pipeline.fit_line(
+                    np.column_stack((additive_axis, valley_fuel)), "линии минимальной концентрации",
+                )
+                minimum_fuel = fit.slope * additive_axis + fit.intercept
+                minima_points = np.column_stack((minimum_fuel, additive_axis))
+                if config.show_min_line:
+                    self._emit_log(
+                        on_log, f"Линия минимальной концентрации: fuel = {fit.slope:.6g} × steam {fit.intercept:+.6g}.",
+                    )
                 if needs_right_line:
                     maxima_detection_method = config.maxima_detection_method
                     right_fuel, analysis_contour_indices, analysis_contour_values = self.find_right_path(
                         config, component_grid, fuel_axis, additive_axis, minimum_fuel,
                     )
-                    right_points = self._path_points(right_fuel, additive_axis, breaks)
+                    right_points = np.column_stack((right_fuel, additive_axis))
                     if show_mean_line:
-                        mean_points = self._path_points((minimum_fuel + right_fuel) / 2, additive_axis, breaks)
+                        mean_points = np.column_stack(((minimum_fuel + right_fuel) / 2, additive_axis))
             self._emit_progress(on_progress, 100)
         except DiffSurfaceCancellationError as exc:
             raise CancellationError(str(exc)) from exc
@@ -134,12 +142,11 @@ class RegimeMapPipeline:
     def find_minimum_path(
         self, grid: np.ndarray, fuel: np.ndarray, tolerance: float,
         should_cancel: CancelCallback | None = None,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> np.ndarray:
         row_minima = grid.min(axis=1)
         candidates = [np.flatnonzero(row <= minimum + tolerance) for row, minimum in zip(grid, row_minima)]
         centers = np.array([fuel[indices].mean() for indices in candidates])
         indices = np.empty(len(grid), dtype=int)
-        breaks = np.zeros(len(grid), dtype=bool)
         previous_fuel = centers[0]
         for row_index, choices in enumerate(candidates):
             self._check_cancel(should_cancel)
@@ -157,11 +164,9 @@ class RegimeMapPipeline:
                     if self._segment_stays_in_band(fuel, lower, upper, previous_index, choice, tolerance):
                         nearest = choice
                         break
-                else:
-                    breaks[row_index] = True
             indices[row_index] = nearest
             previous_fuel = fuel[nearest]
-        return fuel[indices], breaks
+        return fuel[indices]
 
     @staticmethod
     def _segment_stays_in_band(
@@ -184,11 +189,6 @@ class RegimeMapPipeline:
         vertex = np.clip(-linear[concave] / (2 * quadratic[concave]), 0, 1)
         peaks = values[:-1][concave] + vertex * (linear[concave] + vertex * quadratic[concave])
         return bool(np.all(peaks <= limit))
-
-    @staticmethod
-    def _path_points(fuel: np.ndarray, additive: np.ndarray, breaks: np.ndarray) -> np.ndarray:
-        points = np.column_stack((fuel, additive))
-        return np.insert(points, np.flatnonzero(breaks), np.nan, axis=0)
 
     def find_right_path(
         self, config: RegimeMapJobConfig, grid: np.ndarray, fuel: np.ndarray,

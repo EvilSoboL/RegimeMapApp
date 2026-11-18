@@ -91,8 +91,7 @@ def render_result(figure: Figure, result: RegimeMapResult) -> None:
 
     axis.set_xlabel(result.x_axis_label, fontfamily=result.font_family, fontsize=result.font_size)
     axis.set_ylabel(result.y_axis_label, fontfamily=result.font_family, fontsize=result.font_size)
-    if result.x_limits is not None:
-        axis.set_xlim(*result.x_limits)
+    axis.set_xlim(*(result.x_limits or (result.fuel_axis[0], result.fuel_axis[-1])))
     if result.y_limits is not None:
         axis.set_ylim(*result.y_limits)
     axis.set_title(result.input_path.name, fontfamily=result.font_family, fontsize=result.font_size)
