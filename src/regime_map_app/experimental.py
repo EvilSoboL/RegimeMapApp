@@ -37,10 +37,39 @@ PLC_CHANNELS = (PLC_FUEL, PLC_WATER, PLC_ANALOG)
 # Linear fit to the fuel-scale mass slopes from the 09.11.2026 run (f21–f43).
 FUEL_FLOW_INTERCEPT = 0.0472
 FUEL_FLOW_PER_FREQUENCY = 0.03335
+FIRST_RUN_NOMINAL_P = 2500
+SECOND_RUN_P = 3000
+
+# Fit to 21 steady PLC avMass windows from 10.11.2026 (f18–f36).
+# Use the second minute of each regime, except S1000/f26 (16:32–16:34).
+SECOND_RUN_FUEL_INTERCEPT = -0.08073610
+SECOND_RUN_FUEL_PER_FREQUENCY = 0.04522250
 
 
 def fuel_flow_from_frequency(frequency: float) -> float:
     return round(FUEL_FLOW_INTERCEPT + FUEL_FLOW_PER_FREQUENCY * frequency, 8)
+
+
+def estimate_fuel_flow(frequency: float, nozzle_p: float) -> tuple[float, bool]:
+    """Return the estimated flow and whether it extrapolates the calibration."""
+    first_flow = FUEL_FLOW_INTERCEPT + FUEL_FLOW_PER_FREQUENCY * frequency
+    second_flow = SECOND_RUN_FUEL_INTERCEPT + SECOND_RUN_FUEL_PER_FREQUENCY * frequency
+    weight = (nozzle_p - FIRST_RUN_NOMINAL_P) / (SECOND_RUN_P - FIRST_RUN_NOMINAL_P)
+    fuel = round(first_flow + weight * (second_flow - first_flow), 8)
+    if not isfinite(fuel) or fuel <= 0:
+        raise ValueError("Для этих f и P расчёт не даёт положительного конечного расхода.")
+
+    if nozzle_p == FIRST_RUN_NOMINAL_P:
+        frequency_range = (21, 43)
+    elif nozzle_p == SECOND_RUN_P:
+        frequency_range = (18, 36)
+    else:
+        frequency_range = (21, 36)
+    extrapolated = not (
+        FIRST_RUN_NOMINAL_P <= nozzle_p <= SECOND_RUN_P
+        and frequency_range[0] <= frequency <= frequency_range[1]
+    )
+    return fuel, extrapolated
 
 
 def _normalize_header(value: object) -> str:

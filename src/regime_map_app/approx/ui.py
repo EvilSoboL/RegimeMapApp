@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
+from matplotlib.ticker import FormatStrFormatter, MultipleLocator
 from PySide6.QtCore import QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -211,6 +212,11 @@ class ApproxModuleWidget(QWidget):
         axis.grid(alpha=0.2)
         for plot in axes:
             plot.set_ylabel("Расход разбавителя")
+            plot.tick_params(axis="x", labelbottom=True)
+        x_min, x_max = axis.get_xlim()
+        if x_max - x_min <= 1.5:
+            axis.xaxis.set_major_locator(MultipleLocator(0.1))
+            axis.xaxis.set_major_formatter(FormatStrFormatter("%.1f"))
         axes[-1].set_xlabel("Расход топлива")
         self.preview_figure.colorbar(points, ax=list(axes), label=component_label)
         self.preview_canvas.show()

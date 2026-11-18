@@ -30,15 +30,15 @@ from .approx.exceptions import ValidationError
 from .approx.validation import parse_file_metadata
 from .experimental import (
     COMPONENTS,
-    FUEL_FLOW_INTERCEPT,
-    FUEL_FLOW_PER_FREQUENCY,
+    FIRST_RUN_NOMINAL_P,
     PLC_ANALOG,
     PLC_FUEL,
     PLC_WATER,
+    SECOND_RUN_P,
     GasLog,
     PlcLog,
     approximation_csv,
-    fuel_flow_from_frequency,
+    estimate_fuel_flow,
     read_gas_log,
     read_number,
     read_plc_log,
@@ -57,6 +57,8 @@ class ExperimentPoint:
     record_count: int
     plc_summary: str = "—"
     plc_details: str = ""
+    nozzle_p: float | None = None
+    extrapolated: bool = False
 
     def value(self, component: str) -> float | None:
         if component in self.overrides:
@@ -80,9 +82,9 @@ class ExperimentalDataWidget(QWidget):
         form_row.addWidget(self._build_export_form(), 1)
         layout.addLayout(form_row)
 
-        self.points_table = QTableWidget(0, 8)
+        self.points_table = QTableWidget(0, 9)
         self.points_table.setHorizontalHeaderLabels(
-            ["Топливо (fuel)", "Разбавитель (additive)", "Компонент", "Записей", "Файл", "Интервал", "Данные ПЛК", "f"]
+            ["Топливо (fuel)", "Разбавитель (additive)", "Компонент", "Записей", "Файл", "Интервал", "Данные ПЛК", "f", "P"]
         )
         self.points_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.points_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -154,30 +156,36 @@ class ExperimentalDataWidget(QWidget):
 
         self.frequency_edit = QLineEdit()
         self.frequency_edit.setPlaceholderText("Например, f32 или 32")
+        self.nozzle_p_edit = QLineEdit()
+        self.nozzle_p_edit.setPlaceholderText(f"Например, {FIRST_RUN_NOMINAL_P} или {SECOND_RUN_P}")
+        self.nozzle_p_edit.setToolTip(
+            f"Обязательно для точки без времени. Первая серия: P≈{FIRST_RUN_NOMINAL_P} "
+            f"(предположительно). Вторая серия: P={SECOND_RUN_P}."
+        )
         self.fuel_edit = QLineEdit()
         self.additive_edit = QLineEdit()
         self.value_edit = QLineEdit()
         self.value_edit.setPlaceholderText("Оставьте пустым для усреднения")
         form.addRow("Частота форсунки (f)", self.frequency_edit)
+        form.addRow("Уставка форсунки (P)", self.nozzle_p_edit)
         form.addRow("Топливо для режима (fuel)", self.fuel_edit)
         form.addRow("Разбавитель (additive)", self.additive_edit)
         form.addRow("Значение вручную", self.value_edit)
 
         buttons = QHBoxLayout()
         self.add_regime_button = QPushButton("Добавить режим")
-        manual_button = QPushButton("Добавить точку без времени")
-        manual_button.setToolTip(
-            f"Расход в кг/ч = {FUEL_FLOW_INTERCEPT:g} + {FUEL_FLOW_PER_FREQUENCY:g} × f. "
-            "Диапазон исходных замеров: f21–f43."
+        self.add_manual_button = QPushButton("Добавить точку без времени")
+        self.add_manual_button.setToolTip(
+            "Расход в кг/ч рассчитывается по f и P интерполяцией между калибровками двух серий."
         )
         buttons.addWidget(self.add_regime_button)
-        buttons.addWidget(manual_button)
+        buttons.addWidget(self.add_manual_button)
         form.addRow(buttons)
 
         load_button.clicked.connect(self._choose_files)
         self.source_combo.currentIndexChanged.connect(self._select_source)
         self.add_regime_button.clicked.connect(self._add_regime)
-        manual_button.clicked.connect(self._add_manual)
+        self.add_manual_button.clicked.connect(self._add_manual)
         self._select_source()
         return group
 
@@ -328,14 +336,23 @@ class ExperimentalDataWidget(QWidget):
             frequency = read_number(frequency_text, "Частота форсунки (f)")
             if frequency <= 0:
                 raise ValueError("Частота форсунки (f) должна быть больше нуля.")
+            nozzle_p = None
+            p_text = self.nozzle_p_edit.text().strip().lower().removeprefix("p")
+            if manual or self.nozzle_p_edit.text().strip():
+                nozzle_p = read_number(p_text, "Уставка форсунки (P)")
+                if nozzle_p <= 0:
+                    raise ValueError("Уставка форсунки (P) должна быть больше нуля.")
             additive = read_number(self.additive_edit.text(), "Разбавитель (additive)")
             component = self.component_combo.currentData()
             overrides = {}
             if manual or self.value_edit.text().strip():
                 overrides[component] = read_number(self.value_edit.text(), "Значение вручную")
             if manual:
-                fuel = fuel_flow_from_frequency(frequency)
-                point = ExperimentPoint(fuel, frequency, additive, {}, overrides, "", "", 0)
+                fuel, extrapolated = estimate_fuel_flow(frequency, nozzle_p)
+                point = ExperimentPoint(
+                    fuel, frequency, additive, {}, overrides, "", "", 0,
+                    nozzle_p=nozzle_p, extrapolated=extrapolated,
+                )
             else:
                 log = self.logs[self.source_combo.currentData()]
                 start = self._read_regime_start()
@@ -375,7 +392,7 @@ class ExperimentalDataWidget(QWidget):
                 point = ExperimentPoint(
                     fuel, frequency, additive, averages, overrides, log.path.name,
                     f"{start:%d.%m %H:%M:%S}, {duration} с", count,
-                    plc_summary, plc_details,
+                    plc_summary, plc_details, nozzle_p=nozzle_p,
                 )
         except ValueError as exc:
             self.status_label.setText(str(exc))
@@ -385,7 +402,10 @@ class ExperimentalDataWidget(QWidget):
         self.value_edit.clear()
         self._refresh_points()
         self.points_table.selectRow(len(self.points) - 1)
-        self.status_label.setText(f"Добавлено точек: {len(self.points)}.")
+        status = f"Добавлено точек: {len(self.points)}."
+        if point.extrapolated:
+            status += " Расход рассчитан вне диапазона калибровки."
+        self.status_label.setText(status)
 
     def _refresh_points(self) -> None:
         component = self.component_combo.currentData()
@@ -397,10 +417,14 @@ class ExperimentalDataWidget(QWidget):
             value_label = "—" if value is None else f"{value:.8g}"
             if component in point.overrides:
                 value_label += " (вручную)"
+            source_label = point.source or (
+                "Расход по f и P (экстраполяция)" if point.extrapolated else "Расход по f и P"
+            )
             cells = (
                 f"{point.fuel:.8g}", f"{point.additive:.8g}", value_label,
                 f"{count} из {point.record_count}" if point.record_count else "—",
-                point.source or "Расход по f", point.interval, point.plc_summary, f"{point.frequency:.8g}",
+                source_label, point.interval, point.plc_summary, f"{point.frequency:.8g}",
+                "—" if point.nozzle_p is None else f"{point.nozzle_p:.8g}",
             )
             for column, label in enumerate(cells):
                 item = QTableWidgetItem(label)

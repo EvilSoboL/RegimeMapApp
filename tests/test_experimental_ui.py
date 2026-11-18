@@ -57,13 +57,28 @@ def test_multi_file_export_manual_point_and_approximation_handoff(qtbot, monkeyp
     tab.add_regime_button.click()
     tab.value_edit.setText("500")
     tab.frequency_edit.clear()
-    tab._add_manual()
+    tab.add_manual_button.click()
     assert len(tab.points) == 2
     assert "Частота форсунки" in tab.status_label.text()
     tab.frequency_edit.setText("F32")
-    tab._add_manual()
+    for invalid_p in ("", "P0", "-10", "nan"):
+        tab.nozzle_p_edit.setText(invalid_p)
+        tab.add_manual_button.click()
+        assert len(tab.points) == 2
+        assert "Уставка форсунки" in tab.status_label.text()
+
+    tab.nozzle_p_edit.setText("P2500")
+    tab.add_manual_button.click()
     assert tab.points[2].fuel == pytest.approx(1.1144)
     assert tab.points_table.item(2, 7).text() == "32"
+    assert tab.points_table.item(2, 8).text() == "2500"
+
+    tab.nozzle_p_edit.setText("3000")
+    tab.value_edit.setText("450")
+    tab.add_manual_button.click()
+    assert tab.points[2].nozzle_p == 2500
+    assert tab.points[3].fuel == pytest.approx(1.36638390)
+    assert tab.points_table.item(3, 8).text() == "3000"
 
     tab.fuel_name_edit.setText("diesel")
     tab.diluent_name_edit.setText("steam")
@@ -74,7 +89,8 @@ def test_multi_file_export_manual_point_and_approximation_handoff(qtbot, monkeyp
     tab.save_button.click()
 
     assert output.read_text(encoding="utf-8").splitlines() == [
-        "fuel;additive;component", "0.78;400.0;20.0", "0.78;600.0;60.0", "1.1144;600.0;500.0"
+        "fuel;additive;component", "0.78;400.0;20.0", "0.78;600.0;60.0",
+        "1.1144;600.0;500.0", "1.3663839;600.0;450.0",
     ]
     assert window.tabs.currentWidget() is window.approx_widget
     config = window.approx_widget.collect_config()
@@ -84,6 +100,26 @@ def test_multi_file_export_manual_point_and_approximation_handoff(qtbot, monkeyp
     assert window.regime_map_widget.colorbar_label_edit.text() == "O2, %"
     assert not window.regime_map_widget.collect_config().is_co_component
     qapp.processEvents()
+
+
+def test_manual_point_interpolation_and_extrapolation_warning(qtbot):
+    tab = ExperimentalDataWidget()
+    qtbot.addWidget(tab)
+    tab.frequency_edit.setText("32")
+    tab.additive_edit.setText("1000")
+    tab.nozzle_p_edit.setText("2750")
+    tab.value_edit.setText("500")
+    tab.add_manual_button.click()
+
+    assert tab.points[0].fuel == pytest.approx((1.1144 + 1.3663839) / 2)
+    assert not tab.points[0].extrapolated
+
+    tab.frequency_edit.setText("40")
+    tab.value_edit.setText("400")
+    tab.add_manual_button.click()
+    assert tab.points[1].extrapolated
+    assert "вне диапазона" in tab.status_label.text()
+    assert "экстраполяция" in tab.points_table.item(1, 4).text()
 
 
 def test_type_and_paste_regime_start_near_end_of_recording(qtbot, tmp_path, qapp):
@@ -162,6 +198,7 @@ def test_plc_uses_same_window_as_last_gas_records(qtbot, tmp_path):
     tab.average_mode.setCurrentIndex(1)
     tab.tail_spin.setValue(2)
     tab.frequency_edit.setText("f32")
+    tab.nozzle_p_edit.setText("3000")
     tab.additive_edit.setText("400")
     tab.add_regime_button.click()
 
@@ -169,6 +206,7 @@ def test_plc_uses_same_window_as_last_gas_records(qtbot, tmp_path):
     assert tab.points[0].value("CO") == 50
     assert tab.points[0].fuel == 1.5
     assert tab.points[0].frequency == 32
+    assert tab.points[0].nozzle_p == 3000
     assert tab.points_table.item(0, 6).text() == "2 зап."
 
     tab.duration_spin.setValue(10)
