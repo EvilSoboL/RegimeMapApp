@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QStandardPaths, Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QComboBox,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
@@ -24,12 +25,24 @@ from PySide6.QtWidgets import (
 
 from .diff_surface.exceptions import DiffSurfaceError
 from .diff_surface.pipeline import DiffSurfacePipeline
-from .fuel_correlation import FUEL_PROPERTIES, FuelSurface, find_fuel_surfaces, laplace_number, optimal_slope
+from .fuel_correlation import (
+    DEFAULT_FUEL_PROFILE,
+    FuelProfile,
+    FuelSurface,
+    find_fuel_surfaces,
+    laplace_number,
+    load_fuel_profile,
+    optimal_slope,
+)
 
 
 class FuelPropertiesWidget(QWidget):
+    profile_changed = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.profile = DEFAULT_FUEL_PROFILE
+        self._surfaces: list[FuelSurface] = []
         self._rows: dict[str, int] = {}
         self._entries: dict[str, tuple[str, ...]] = {}
         self.table = QTableWidget(0, 7, self)
@@ -44,17 +57,52 @@ class FuelPropertiesWidget(QWidget):
         self.table.cellChanged.connect(self._update_row)
 
         layout = QVBoxLayout(self)
+        profile_row = QHBoxLayout()
+        self.profile_label = QLabel(self.profile.name)
+        self.profile_label.setTextFormat(Qt.TextFormat.PlainText)
+        open_profile = QPushButton("Открыть конфиг…")
+        open_profile.clicked.connect(self._open_profile)
+        default_profile = QPushButton("Конфиг по умолчанию")
+        default_profile.clicked.connect(lambda: self._apply_profile(DEFAULT_FUEL_PROFILE))
+        profile_row.addWidget(QLabel("Профиль топлива"))
+        profile_row.addWidget(self.profile_label, 1)
+        profile_row.addWidget(open_profile)
+        profile_row.addWidget(default_profile)
+        layout.addLayout(profile_row)
         self.summary = QLabel("Выберите папку во вкладке «Корреляция».")
         layout.addWidget(self.summary)
         layout.addWidget(self.table)
         formula = QLabel(
-            "La = ρσD/μ². Начальный диаметр капли 2 мм можно изменить для каждого топлива. "
-            "Источники дополнительных справочных значений указаны в примечаниях."
+            "La = ρσD/μ². Источники справочных значений указаны в примечаниях. "
+            "Ручные правки действуют до смены профиля или закрытия приложения."
         )
         formula.setWordWrap(True)
         layout.addWidget(formula)
 
+    def _open_profile(self) -> None:
+        desktop = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
+        filename, _ = QFileDialog.getOpenFileName(self, "Конфиг параметров топлива", desktop, "Конфиг JSON (*.json)")
+        if not filename:
+            return
+        try:
+            self.load_profile(Path(filename))
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Ошибка чтения конфига", str(exc))
+
+    def load_profile(self, path: Path) -> None:
+        self._apply_profile(load_fuel_profile(path), path)
+
+    def _apply_profile(self, profile: FuelProfile, path: Path | None = None) -> None:
+        self.profile = profile
+        self.profile_label.setText(profile.name)
+        self.profile_label.setToolTip(str(path) if path else "Встроенный профиль")
+        self._entries.clear()
+        if self._surfaces:
+            self.set_surfaces(self._surfaces)
+        self.profile_changed.emit()
+
     def set_surfaces(self, surfaces: list[FuelSurface]) -> None:
+        self._surfaces = surfaces
         fuels: dict[str, list[FuelSurface]] = {}
         for surface in surfaces:
             fuels.setdefault(surface.key, []).append(surface)
@@ -65,11 +113,11 @@ class FuelPropertiesWidget(QWidget):
             self.table.setRowCount(len(fuels))
             for key, files in fuels.items():
                 row = self._rows[key]
-                properties = FUEL_PROPERTIES.get(key)
+                properties = self.profile.fuels.get(key)
                 label = properties.label if properties else files[0].fuel_name
                 defaults = (
                     str(properties.density), str(properties.surface_tension), str(properties.viscosity),
-                    "2", properties.composition,
+                    str(properties.diameter), properties.composition,
                 ) if properties else ("", "", "", "2", "")
                 entries = self._entries.get(key, defaults)
                 self._set_read_only(row, 0, label).setToolTip("\n".join(file.path.name for file in files))
@@ -160,6 +208,7 @@ class FuelCorrelationWidget(QWidget):
         self.issues.hide()
         layout.addWidget(self.issues)
         self.properties.table.cellChanged.connect(self._property_changed)
+        self.properties.profile_changed.connect(self._invalidate)
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Папка с поверхностями CSV", self.folder.text())

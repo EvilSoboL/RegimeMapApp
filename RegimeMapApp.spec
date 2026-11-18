@@ -13,6 +13,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(icon_path), "regime_map_app/assets"),
+        (str(icon_path.with_name("fuel_properties.json")), "regime_map_app/assets"),
     ],
     hiddenimports=[
         "matplotlib.backends.backend_qtagg",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
@@ -19,39 +20,15 @@ class FuelProperties:
     surface_tension: float
     viscosity: float
     composition: str = ""
+    diameter: float = 2.0
 
 
-# Temperature fits for the automotive diesel sample studied by Esteban et al.
-# Density and kinematic viscosity: https://doi.org/10.1016/j.biombioe.2012.03.007
-# Tables 4 and 6: ρ = 844.2 − 0.67009 t, ν = exp(−1.2202 − 499.62/T + 373853.59/T²).
-# Surface tension: https://doi.org/10.1016/j.fuel.2012.07.042
-# σ = 29.6168 − 0.0789 t. t is in °C, T is in K, and μ [mPa·s] = ρ ν / 1000.
-DIESEL_TEMPERATURE_NOTE = (
-    "Справочная оценка по измерениям образца Esteban и др. (2012). "
-    "Плотность и вязкость — Biomass and Bioenergy 42, табл. 4 и 6. "
-    "Поверхностное натяжение — Fuel 102, с. 231–238. Состав партии опытов неизвестен."
-)
+@dataclass(frozen=True)
+class FuelProfile:
+    name: str
+    fuels: dict[str, FuelProperties]
 
-# Other rows use the values from the biofuel correlation notebook.
-FUEL_PROPERTIES = {
-    "diesel": FuelProperties("Дизельное топливо", 839.89, 30.8, 3.44),
-    "дизель27": FuelProperties("Дизельное топливо, 27 °C", 826.1, 27.49, 2.927, DIESEL_TEMPERATURE_NOTE),
-    "дизель45": FuelProperties("Дизельное топливо, 45 °C", 814.0, 26.07, 2.008, DIESEL_TEMPERATURE_NOTE),
-    "дизель75": FuelProperties("Дизельное топливо, 75 °C", 793.9, 23.70, 1.219, DIESEL_TEMPERATURE_NOTE),
-    "crude_oil": FuelProperties("Сырая нефть", 815.61, 28, 5.14),
-    "heavy_oil": FuelProperties("Мазут", 890, 30, 50),
-    "kerosene": FuelProperties("Керосин", 788.89, 26.6, 1.49),
-    "waste_oil": FuelProperties("Отработанное масло", 920, 26.6, 125.82),
-    "waste_oil_40_2024": FuelProperties("Отработанное масло, 40 °C", 899.9, 26.6, 49.34),
-    "waste_oil_60_2024": FuelProperties("Отработанное масло, 60 °C", 879.2, 26.6, 23.54),
-    "diesel_90_mefa_rapeseed_10": FuelProperties(
-        "Дизель + МЭЖК (rapeseed)", 751, 27.5, 2.65854,
-        "90% дизельного топлива, 10% МЭЖК. В ноутбуке есть подписи «рапсовое» и «рыжиковое».",
-    ),
-    "diesel_90_mefa_tall_10": FuelProperties(
-        "Дизель + талловые МЭЖК", 735, 26.8, 2.793, "90% дизельного топлива, 10% талловых МЭЖК.",
-    ),
-}
+
 FUEL_ALIASES = {"дизель": "diesel", "керосин": "kerosene", "мазут": "heavy_oil", "сырая нефть": "crude_oil"}
 MINIMUM_ADJUSTMENTS = {"waste_oil": (5, 0.025), "waste_oil_40_2024": (17, 0), "waste_oil_60_2024": (17, 0.1)}
 BOUNDARY_ADJUSTMENTS = {
@@ -71,6 +48,55 @@ def laplace_number(density: float, surface_tension: float, viscosity: float, dia
     if not isfinite(result) or result == 0:
         raise ValueError("Число Лапласа выходит за пределы численного диапазона.")
     return result
+
+
+def _fuel_key(name: str) -> str:
+    key = name.strip().casefold()
+    return FUEL_ALIASES.get(key, key)
+
+
+def _unique_json_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result = {}
+    for name, value in pairs:
+        if name in result:
+            raise ValueError(f"Ключ «{name}» повторяется в конфиге.")
+        result[name] = value
+    return result
+
+
+def load_fuel_profile(path: Path) -> FuelProfile:
+    with path.open(encoding="utf-8-sig") as stream:
+        data = json.load(stream, object_pairs_hook=_unique_json_fields)
+    if not isinstance(data, dict) or not isinstance(data.get("fuels"), dict) or not data["fuels"]:
+        raise ValueError("В конфиге нужен непустой объект «fuels».")
+    name = data.get("name", path.stem)
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("Название конфига «name» должно быть непустой строкой.")
+
+    fuels = {}
+    for identifier, entry in data["fuels"].items():
+        key = _fuel_key(identifier)
+        if not key or key in fuels or not isinstance(entry, dict):
+            raise ValueError(f"Недопустимая или повторная запись топлива «{identifier}».")
+        label = entry.get("label", identifier)
+        composition = entry.get("composition", "")
+        if not isinstance(label, str) or not label.strip() or not isinstance(composition, str):
+            raise ValueError(f"«{identifier}». Поля label и composition должны быть строками.")
+        fields = ("density", "surface_tension", "viscosity", "diameter")
+        values = [entry.get(field) for field in fields[:3]] + [entry.get("diameter", 2.0)]
+        for field, value in zip(fields, values):
+            if type(value) not in (int, float):
+                raise ValueError(f"«{identifier}». Параметр {field} должен быть числом.")
+        try:
+            laplace_number(*values)
+        except (ValueError, OverflowError) as exc:
+            raise ValueError(f"«{identifier}». Некорректные свойства топлива. {exc}") from exc
+        density, surface_tension, viscosity, diameter = values
+        fuels[key] = FuelProperties(label, density, surface_tension, viscosity, composition, diameter)
+    return FuelProfile(name.strip(), fuels)
+
+
+DEFAULT_FUEL_PROFILE = load_fuel_profile(Path(__file__).with_name("assets") / "fuel_properties.json")
 
 
 @dataclass(frozen=True)
@@ -94,9 +120,8 @@ def find_fuel_surfaces(folder: Path) -> tuple[list[FuelSurface], list[str]]:
         if metadata.component_name.casefold() != "co" or metadata.diluent.casefold() not in {"steam", "пар"}:
             skipped.append(f"{path.name}: для графика нужна поверхность CO с подачей пара.")
             continue
-        key = metadata.fuel_name.casefold()
-        surfaces.append(FuelSurface(path, metadata.fuel_name, FUEL_ALIASES.get(key, key)))
-    order = {key: index for index, key in enumerate(FUEL_PROPERTIES)}
+        surfaces.append(FuelSurface(path, metadata.fuel_name, _fuel_key(metadata.fuel_name)))
+    order = {key: index for index, key in enumerate(DEFAULT_FUEL_PROFILE.fuels)}
     surfaces.sort(key=lambda surface: order.get(surface.key, len(order)))
     return surfaces, skipped
 
