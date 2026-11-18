@@ -68,7 +68,7 @@ def render_result(figure: Figure, result: DifferentialSurfaceResult) -> None:
         result.minima_line_fit,
         color="#ff7f0e",
         linestyle="--",
-        label=_line_label("Линия минимальной концентрации", result.minima_line_fit.slope, result.minima_line_fit.intercept),
+        label=f"Линия минимальной концентрации: {result.minima_line_fit.equation()}",
     )
     _plot_clipped_line(
         axis,
@@ -77,7 +77,7 @@ def render_result(figure: Figure, result: DifferentialSurfaceResult) -> None:
         result.left_line_fit,
         color="#d62728",
         linestyle="-",
-        label=_line_label("Левая линия максимумов", result.left_line_fit.slope, result.left_line_fit.intercept),
+        label=f"Левая линия максимумов: {result.left_line_fit.equation()}",
     )
     _plot_clipped_line(
         axis,
@@ -86,7 +86,7 @@ def render_result(figure: Figure, result: DifferentialSurfaceResult) -> None:
         result.right_line_fit,
         color="#1f77b4",
         linestyle="-",
-        label=_line_label("Правая линия максимумов", result.right_line_fit.slope, result.right_line_fit.intercept),
+        label=f"Правая линия максимумов: {result.right_line_fit.equation()}",
     )
 
     axis.set_xlabel("fuel")
@@ -120,10 +120,6 @@ def _build_levels(surface: np.ndarray) -> int | np.ndarray:
     return 20
 
 
-def _line_label(prefix: str, slope: float, intercept: float) -> str:
-    return f"{prefix}: y = {slope:.3g}x + {intercept:.3g}"
-
-
 def _plot_clipped_line(
     axis,
     fuel_axis: np.ndarray,
@@ -134,16 +130,19 @@ def _plot_clipped_line(
     linestyle: str,
     label: str,
 ) -> None:
+    independent, dependent = (
+        (additive_axis, fuel_axis) if line_fit.fuel_from_additive else (fuel_axis, additive_axis)
+    )
     clipped_segment = _clip_line_to_surface_bounds(
-        fuel_axis,
-        additive_axis,
+        independent,
+        dependent,
         line_fit.slope,
         line_fit.intercept,
     )
     if clipped_segment is None:
         return
 
-    line_x, line_y = clipped_segment
+    line_x, line_y = clipped_segment[::-1] if line_fit.fuel_from_additive else clipped_segment
     axis.plot(
         line_x,
         line_y,

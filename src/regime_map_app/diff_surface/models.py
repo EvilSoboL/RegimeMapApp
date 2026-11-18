@@ -54,6 +54,12 @@ class ValidationResult:
 class LineFit:
     slope: float
     intercept: float
+    fuel_from_additive: bool = False
+
+    def equation(self, precision: int = 3) -> str:
+        x, y = ("y", "x") if self.fuel_from_additive else ("x", "y")
+        sign = "+" if self.intercept >= 0 else "−"
+        return f"{y} = {self.slope:.{precision}g}{x} {sign} {abs(self.intercept):.{precision}g}"
 
 
 @dataclass(frozen=True)

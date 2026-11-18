@@ -30,19 +30,17 @@ from .approx.exceptions import ValidationError
 from .approx.validation import parse_file_metadata
 from .experimental import (
     COMPONENTS,
-    FIRST_RUN_NOMINAL_P,
     PLC_ANALOG,
     PLC_FUEL,
     PLC_WATER,
-    SECOND_RUN_P,
     GasLog,
     PlcLog,
     approximation_csv,
-    estimate_fuel_flow,
     read_gas_log,
     read_number,
     read_plc_log,
 )
+from .experimental_comparison import FuelComparisonDialog, FuelComparisonRegime
 
 
 @dataclass
@@ -59,6 +57,8 @@ class ExperimentPoint:
     plc_details: str = ""
     nozzle_p: float | None = None
     extrapolated: bool = False
+    comparison_regime: FuelComparisonRegime | None = None
+    calibration_equation: str = ""
 
     def value(self, component: str) -> float | None:
         if component in self.overrides:
@@ -75,8 +75,17 @@ class ExperimentalDataWidget(QWidget):
         self.logs: dict[Path, GasLog] = {}
         self.plc_log: PlcLog | None = None
         self.points: list[ExperimentPoint] = []
+        self.comparison_only: list[FuelComparisonRegime] = []
+        self.comparison_dialog = FuelComparisonDialog(self)
+        self.comparison_dialog.remove_requested.connect(self._remove_comparison_regimes)
 
         layout = QVBoxLayout(self)
+        self.add_comparison_button = QPushButton("Добавить для сверки")
+        self.add_comparison_button.setToolTip(
+            "Сохранить окно, f, P и разбавитель для сверки с ПЛК без добавления точки на карту."
+        )
+        self.compare_button = QPushButton("Сверить с ПЛК…")
+        self.compare_button.setToolTip("Сравнить замеры и получить коэффициенты для точек без времени.")
         form_row = QHBoxLayout()
         form_row.addWidget(self._build_regime_form(), 1)
         form_row.addWidget(self._build_export_form(), 1)
@@ -109,7 +118,10 @@ class ExperimentalDataWidget(QWidget):
         self.points_table.itemSelectionChanged.connect(self._refresh_actions)
         self.remove_button.clicked.connect(self._remove_point)
         self.override_button.clicked.connect(self._override_point)
+        self.compare_button.clicked.connect(self._show_comparison)
         self.save_button.clicked.connect(self._save_csv)
+        self.comparison_dialog.calibrations_changed.connect(self._refresh_calibration_status)
+        self._refresh_calibration_status()
         self._refresh_actions()
 
     def _build_regime_form(self) -> QGroupBox:
@@ -157,10 +169,9 @@ class ExperimentalDataWidget(QWidget):
         self.frequency_edit = QLineEdit()
         self.frequency_edit.setPlaceholderText("Например, f32 или 32")
         self.nozzle_p_edit = QLineEdit()
-        self.nozzle_p_edit.setPlaceholderText(f"Например, {FIRST_RUN_NOMINAL_P} или {SECOND_RUN_P}")
+        self.nozzle_p_edit.setPlaceholderText("Например, P3000")
         self.nozzle_p_edit.setToolTip(
-            f"Обязательно для точки без времени. Первая серия: P≈{FIRST_RUN_NOMINAL_P} "
-            f"(предположительно). Вторая серия: P={SECOND_RUN_P}."
+            "Для калибровки введите фактическую уставку режима. Для точки без времени нужны коэффициенты при этом P."
         )
         self.fuel_edit = QLineEdit()
         self.additive_edit = QLineEdit()
@@ -175,9 +186,6 @@ class ExperimentalDataWidget(QWidget):
         buttons = QHBoxLayout()
         self.add_regime_button = QPushButton("Добавить режим")
         self.add_manual_button = QPushButton("Добавить точку без времени")
-        self.add_manual_button.setToolTip(
-            "Расход в кг/ч рассчитывается по f и P интерполяцией между калибровками двух серий."
-        )
         buttons.addWidget(self.add_regime_button)
         buttons.addWidget(self.add_manual_button)
         form.addRow(buttons)
@@ -185,6 +193,7 @@ class ExperimentalDataWidget(QWidget):
         load_button.clicked.connect(self._choose_files)
         self.source_combo.currentIndexChanged.connect(self._select_source)
         self.add_regime_button.clicked.connect(self._add_regime)
+        self.add_comparison_button.clicked.connect(self._add_comparison_regime)
         self.add_manual_button.clicked.connect(self._add_manual)
         self._select_source()
         return group
@@ -221,6 +230,14 @@ class ExperimentalDataWidget(QWidget):
         self.plc_coverage_label = QLabel()
         self.plc_coverage_label.setWordWrap(True)
         form.addRow("", self.plc_coverage_label)
+        comparison = QHBoxLayout()
+        comparison.addWidget(self.add_comparison_button)
+        comparison.addWidget(self.compare_button)
+        comparison.addStretch()
+        form.addRow(comparison)
+        self.calibration_status_label = QLabel()
+        self.calibration_status_label.setWordWrap(True)
+        form.addRow(self.calibration_status_label)
         plc_button.clicked.connect(self._choose_plc)
         clear_plc_button.clicked.connect(self._clear_plc)
         self.fuel_name_edit.textChanged.connect(self._refresh_filename)
@@ -256,6 +273,7 @@ class ExperimentalDataWidget(QWidget):
             self.status_label.setText(str(exc))
             return
         self.plc_log = log
+        self._refresh_comparison()
         self.plc_file_edit.setText(path.name)
         self.plc_file_edit.setToolTip(str(path))
         self.plc_coverage_label.setText(
@@ -266,6 +284,7 @@ class ExperimentalDataWidget(QWidget):
 
     def _clear_plc(self) -> None:
         self.plc_log = None
+        self._refresh_comparison()
         self.plc_file_edit.clear()
         self.plc_file_edit.setToolTip("")
         self.plc_coverage_label.clear()
@@ -298,7 +317,10 @@ class ExperimentalDataWidget(QWidget):
 
     def _select_source(self) -> None:
         log = self.logs.get(self.source_combo.currentData())
-        controls = (self.start_time_edit, self.duration_spin, self.average_mode, self.tail_spin, self.add_regime_button)
+        controls = (
+            self.start_time_edit, self.duration_spin, self.average_mode, self.tail_spin,
+            self.add_regime_button, self.add_comparison_button,
+        )
         for control in controls:
             control.setEnabled(log is not None)
         if log is None:
@@ -330,43 +352,101 @@ class ExperimentalDataWidget(QWidget):
     def _add_manual(self) -> None:
         self._add_point(manual=True)
 
+    def _read_regime_settings(self, *, require_p: bool) -> tuple[float, float | None, float]:
+        frequency_text = self.frequency_edit.text().strip().lower().removeprefix("f")
+        frequency = read_number(frequency_text, "Частота форсунки (f)")
+        if frequency <= 0:
+            raise ValueError("Частота форсунки (f) должна быть больше нуля.")
+        nozzle_p = None
+        p_text = self.nozzle_p_edit.text().strip().lower()
+        if require_p or p_text:
+            nozzle_p = read_number(p_text.removeprefix("p"), "Уставка форсунки (P)")
+            if nozzle_p <= 0:
+                raise ValueError("Уставка форсунки (P) должна быть больше нуля.")
+        additive = read_number(self.additive_edit.text(), "Разбавитель (additive)")
+        return frequency, nozzle_p, additive
+
+    def _averaging_settings(self) -> tuple[int, int, int | None]:
+        tail = self.tail_spin.value()
+        records = tail if self.average_mode.currentIndex() == 1 else None
+        return self.duration_spin.value(), tail, records
+
+    def _comparison_regimes(self) -> list[FuelComparisonRegime]:
+        return self.comparison_only + [
+            point.comparison_regime for point in self.points if point.comparison_regime is not None
+        ]
+
+    def _show_comparison(self) -> None:
+        self._refresh_comparison()
+        self.comparison_dialog.open()
+
+    def _refresh_comparison(self) -> None:
+        self.comparison_dialog.set_data(self.plc_log, self._comparison_regimes(), self.comparison_only)
+
+    def _refresh_calibration_status(self) -> None:
+        calibrations = self.comparison_dialog.calibrations
+        if calibrations:
+            pressures = ", ".join(f"{pressure:g}" for pressure in sorted(calibrations))
+            self.calibration_status_label.setText(f"Коэффициенты готовы для P {pressures}.")
+            self.add_manual_button.setToolTip("Расход в кг/ч берётся из калибровки ПЛК для указанного P.")
+        else:
+            self.calibration_status_label.setText("Для точек без времени получите коэффициенты в сверке с ПЛК.")
+            self.add_manual_button.setToolTip(self.calibration_status_label.text())
+
+    def _add_comparison_regime(self) -> None:
+        try:
+            frequency, nozzle_p, additive = self._read_regime_settings(require_p=True)
+            log = self.logs[self.source_combo.currentData()]
+            start = self._read_regime_start()
+            _, _, first, end = log.averaging_window(start, *self._averaging_settings())
+        except ValueError as exc:
+            self.status_label.setText(str(exc))
+            return
+        regime = FuelComparisonRegime(log.path, first, end, frequency, nozzle_p, additive)
+        regimes = self._comparison_regimes()
+        if regime in regimes:
+            self.status_label.setText("Этот режим уже есть в сверке.")
+            return
+        self.comparison_only.append(regime)
+        self.status_label.setText(f"Режимов для сверки с ПЛК: {len(set(regimes)) + 1}.")
+
+    def _remove_comparison_regimes(self, regimes: list[FuelComparisonRegime]) -> None:
+        selected = set(regimes)
+        self.comparison_only = [regime for regime in self.comparison_only if regime not in selected]
+        self._refresh_comparison()
+
     def _add_point(self, *, manual: bool) -> None:
         try:
-            frequency_text = self.frequency_edit.text().strip().lower().removeprefix("f")
-            frequency = read_number(frequency_text, "Частота форсунки (f)")
-            if frequency <= 0:
-                raise ValueError("Частота форсунки (f) должна быть больше нуля.")
-            nozzle_p = None
-            p_text = self.nozzle_p_edit.text().strip().lower().removeprefix("p")
-            if manual or self.nozzle_p_edit.text().strip():
-                nozzle_p = read_number(p_text, "Уставка форсунки (P)")
-                if nozzle_p <= 0:
-                    raise ValueError("Уставка форсунки (P) должна быть больше нуля.")
-            additive = read_number(self.additive_edit.text(), "Разбавитель (additive)")
+            frequency, nozzle_p, additive = self._read_regime_settings(require_p=manual)
+            calibration = self.comparison_dialog.calibrations.get(nozzle_p) if manual else None
+            if manual and calibration is None:
+                raise ValueError(f"Для P {nozzle_p:g} нажмите «Получить коэффициенты» в окне «Сверить с ПЛК».")
             component = self.component_combo.currentData()
             overrides = {}
             if manual or self.value_edit.text().strip():
                 overrides[component] = read_number(self.value_edit.text(), "Значение вручную")
-            if manual:
-                fuel, extrapolated = estimate_fuel_flow(frequency, nozzle_p)
+            if calibration is not None:
+                fuel, extrapolated = calibration.estimate(frequency)
                 point = ExperimentPoint(
                     fuel, frequency, additive, {}, overrides, "", "", 0,
                     nozzle_p=nozzle_p, extrapolated=extrapolated,
+                    calibration_equation=calibration.equation,
                 )
             else:
                 log = self.logs[self.source_combo.currentData()]
                 start = self._read_regime_start()
-                duration = self.duration_spin.value()
-                tail = self.tail_spin.value()
-                records = tail if self.average_mode.currentIndex() == 1 else None
+                duration, tail, records = self._averaging_settings()
                 averages, count = log.summarize(start, duration, tail, records)
                 if component not in averages and component not in overrides:
-                    raise ValueError("В окне усреднения нет числовых показаний выбранного компонента.")
+                    raise ValueError(
+                        f"В окне усреднения нет числовых показаний {component}. "
+                        "Заполните поле «Значение вручную», если известно значение."
+                    )
                 plc_values = {}
                 plc_summary = "—"
                 plc_details = ""
+                _, _, first, end = log.averaging_window(start, duration, tail, records)
                 if self.plc_log is not None:
-                    _, _, first, end = log.averaging_window(start, duration, tail, records)
                     plc_values, plc_count = self.plc_log.summarize(first, end)
                     if not plc_count:
                         raise ValueError("Нет записей ПЛК в окне усреднения. Проверьте дату и время обеих выгрузок.")
@@ -393,6 +473,7 @@ class ExperimentalDataWidget(QWidget):
                     fuel, frequency, additive, averages, overrides, log.path.name,
                     f"{start:%d.%m %H:%M:%S}, {duration} с", count,
                     plc_summary, plc_details, nozzle_p=nozzle_p,
+                    comparison_regime=FuelComparisonRegime(log.path, first, end, frequency, nozzle_p, additive),
                 )
         except ValueError as exc:
             self.status_label.setText(str(exc))
@@ -418,7 +499,7 @@ class ExperimentalDataWidget(QWidget):
             if component in point.overrides:
                 value_label += " (вручную)"
             source_label = point.source or (
-                "Расход по f и P (экстраполяция)" if point.extrapolated else "Расход по f и P"
+                "Калибровка ПЛК (экстраполяция)" if point.extrapolated else "Калибровка ПЛК"
             )
             cells = (
                 f"{point.fuel:.8g}", f"{point.additive:.8g}", value_label,
@@ -428,7 +509,12 @@ class ExperimentalDataWidget(QWidget):
             )
             for column, label in enumerate(cells):
                 item = QTableWidgetItem(label)
-                item.setToolTip(point.plc_details if column == 6 and point.plc_details else label)
+                if column == 4 and point.calibration_equation:
+                    item.setToolTip(f"{label}\n{point.calibration_equation}")
+                elif column == 6 and point.plc_details:
+                    item.setToolTip(point.plc_details)
+                else:
+                    item.setToolTip(label)
                 self.points_table.setItem(index, column, item)
         self._refresh_actions()
 

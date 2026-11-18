@@ -199,12 +199,31 @@ def test_process_job_builds_surface_and_restores_three_lines(tmp_path: Path) -> 
     )
 
     assert result.surface_mode is SurfaceMode.GRADIENT_MAGNITUDE
+    assert result.minima_line_fit.fuel_from_additive
     assert np.array_equal(result.minima_points, np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]))
     assert np.array_equal(result.left_maxima_points, np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [2.0, 3.0], [3.0, 3.0]]))
     assert np.array_equal(result.right_maxima_points, np.array([[2.0, 0.0], [2.0, 1.0], [3.0, 2.0]]))
     assert np.isfinite(result.minima_line_fit.slope)
     assert np.isfinite(result.left_line_fit.slope)
     assert np.isfinite(result.right_line_fit.slope)
+
+
+def test_fit_minimum_line_supports_a_vertical_valley() -> None:
+    fuel = np.array([1.0, 2.0, 3.0, 4.0])
+    steam = np.array([400.0, 600.0, 1000.0])
+    component = np.tile([100.0, 10.0, 90.0, 150.0], (steam.size, 1))
+    pipeline = DiffSurfacePipeline()
+
+    points, fit = pipeline.fit_minimum_line(component, fuel, steam, 10.0)
+    left, right = pipeline.classify_points_by_reference_line(
+        np.array([[1.0, 400.0], [3.0, 1000.0]]), fit,
+    )
+
+    np.testing.assert_allclose(points[:, 0], 2.0)
+    assert fit.fuel_from_additive
+    np.testing.assert_allclose(fit.slope * steam + fit.intercept, 2.0)
+    np.testing.assert_array_equal(left, [[1.0, 400.0]])
+    np.testing.assert_array_equal(right, [[3.0, 1000.0]])
 
 
 def test_process_job_supports_contour_level_detection(tmp_path: Path) -> None:

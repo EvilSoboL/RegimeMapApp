@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from io import StringIO
 from math import isfinite
 from pathlib import Path
-from statistics import mean
+from statistics import linear_regression, mean
 from zipfile import BadZipFile
 
 from openpyxl import load_workbook
@@ -37,39 +37,42 @@ PLC_CHANNELS = (PLC_FUEL, PLC_WATER, PLC_ANALOG)
 # Linear fit to the fuel-scale mass slopes from the 09.11.2026 run (f21–f43).
 FUEL_FLOW_INTERCEPT = 0.0472
 FUEL_FLOW_PER_FREQUENCY = 0.03335
-FIRST_RUN_NOMINAL_P = 2500
-SECOND_RUN_P = 3000
-
-# Fit to 21 steady PLC avMass windows from 10.11.2026 (f18–f36).
-# Use the second minute of each regime, except S1000/f26 (16:32–16:34).
-SECOND_RUN_FUEL_INTERCEPT = -0.08073610
-SECOND_RUN_FUEL_PER_FREQUENCY = 0.04522250
 
 
 def fuel_flow_from_frequency(frequency: float) -> float:
     return round(FUEL_FLOW_INTERCEPT + FUEL_FLOW_PER_FREQUENCY * frequency, 8)
 
 
-def estimate_fuel_flow(frequency: float, nozzle_p: float) -> tuple[float, bool]:
-    """Return the estimated flow and whether it extrapolates the calibration."""
-    first_flow = FUEL_FLOW_INTERCEPT + FUEL_FLOW_PER_FREQUENCY * frequency
-    second_flow = SECOND_RUN_FUEL_INTERCEPT + SECOND_RUN_FUEL_PER_FREQUENCY * frequency
-    weight = (nozzle_p - FIRST_RUN_NOMINAL_P) / (SECOND_RUN_P - FIRST_RUN_NOMINAL_P)
-    fuel = round(first_flow + weight * (second_flow - first_flow), 8)
-    if not isfinite(fuel) or fuel <= 0:
-        raise ValueError("Для этих f и P расчёт не даёт положительного конечного расхода.")
+@dataclass(frozen=True)
+class FuelCalibration:
+    intercept: float
+    slope: float
+    minimum_frequency: float
+    maximum_frequency: float
+    frequency_count: int
+    regime_count: int
 
-    if nozzle_p == FIRST_RUN_NOMINAL_P:
-        frequency_range = (21, 43)
-    elif nozzle_p == SECOND_RUN_P:
-        frequency_range = (18, 36)
-    else:
-        frequency_range = (21, 36)
-    extrapolated = not (
-        FIRST_RUN_NOMINAL_P <= nozzle_p <= SECOND_RUN_P
-        and frequency_range[0] <= frequency <= frequency_range[1]
-    )
-    return fuel, extrapolated
+    @classmethod
+    def fit(cls, samples: list[tuple[float, float]]) -> FuelCalibration:
+        by_frequency: dict[float, list[float]] = {}
+        for frequency, fuel in samples:
+            by_frequency.setdefault(frequency, []).append(fuel)
+        if len(by_frequency) < 2:
+            raise ValueError(f"Нужно минимум 2 разные f, сейчас {len(by_frequency)}.")
+        frequencies = sorted(by_frequency)
+        slope, intercept = linear_regression(frequencies, [mean(by_frequency[f]) for f in frequencies])
+        return cls(intercept, slope, frequencies[0], frequencies[-1], len(frequencies), len(samples))
+
+    @property
+    def equation(self) -> str:
+        sign = "+" if self.slope >= 0 else "−"
+        return f"Q = {self.intercept:.8g} {sign} {abs(self.slope):.8g} × f, кг/ч"
+
+    def estimate(self, frequency: float) -> tuple[float, bool]:
+        fuel = self.intercept + self.slope * frequency
+        if not isfinite(fuel) or fuel <= 0:
+            raise ValueError("Калибровка для этой частоты не даёт положительного расхода.")
+        return fuel, not self.minimum_frequency <= frequency <= self.maximum_frequency
 
 
 def _normalize_header(value: object) -> str:
@@ -107,7 +110,7 @@ class GasLog:
 
         averages = {}
         for component in COMPONENTS.values():
-            values = [row[component] for row in window if row[component] is not None]
+            values = [value for row in window if (value := row.get(component)) is not None]
             if values:
                 averages[component] = (mean(values), len(values))
         return averages, len(window)
@@ -138,10 +141,13 @@ class PlcLog:
     times: tuple[datetime, ...]
     readings: tuple[dict[str, float], ...]
 
-    def summarize(self, start: datetime, end: datetime) -> tuple[dict[str, float], int]:
+    def window(self, start: datetime, end: datetime) -> tuple[dict[str, float], ...]:
         first = bisect_left(self.times, start)
         stop = bisect_left(self.times, end, lo=first)
-        window = self.readings[first:stop]
+        return self.readings[first:stop]
+
+    def summarize(self, start: datetime, end: datetime) -> tuple[dict[str, float], int]:
+        window = self.window(start, end)
         averages = {}
         for channel in PLC_CHANNELS:
             values = [row[channel] for row in window if channel in row]
@@ -197,12 +203,17 @@ def read_gas_log(path: Path) -> GasLog:
         rows = workbook.active.values
         header = next(rows, ())
         columns = {_normalize_header(value): index for index, value in enumerate(header)}
-        required = (TIME_HEADER, *COMPONENTS)
-        missing = [label for label in required if _normalize_header(label) not in columns]
-        if missing:
-            raise ValueError(f"В файле «{path.name}» отсутствуют столбцы: {', '.join(missing)}.")
-        time_index = columns[_normalize_header(TIME_HEADER)]
-        component_indices = {key: columns[_normalize_header(label)] for label, key in COMPONENTS.items()}
+        time_column = _normalize_header(TIME_HEADER)
+        if time_column not in columns:
+            raise ValueError(f"В файле «{path.name}» отсутствует столбец «{TIME_HEADER}».")
+        time_index = columns[time_column]
+        component_indices = {
+            key: index
+            for label, key in COMPONENTS.items()
+            if (index := columns.get(_normalize_header(label))) is not None
+        }
+        if not component_indices:
+            raise ValueError(f"В файле «{path.name}» нет столбцов поддерживаемых компонентов газового анализа.")
         samples = []
         for row_number, row in enumerate(rows, 2):
             if all(value is None for value in row):

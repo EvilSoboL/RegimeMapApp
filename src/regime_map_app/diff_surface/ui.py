@@ -316,13 +316,13 @@ class DiffSurfaceModuleWidget(QWidget):
             )
             self.append_log(f"Использованы линии уровня: {contour_details}.")
         self.append_log(
-            f"Построение завершено. Линия минимальной концентрации: a={result.minima_line_fit.slope:.6g}, b={result.minima_line_fit.intercept:.6g}."
+            f"Построение завершено. Линия минимальной концентрации: {result.minima_line_fit.equation(6)}."
         )
         self.append_log(
-            f"Левая линия максимумов: a={result.left_line_fit.slope:.6g}, b={result.left_line_fit.intercept:.6g}."
+            f"Левая линия максимумов: {result.left_line_fit.equation(6)}."
         )
         self.append_log(
-            f"Правая линия максимумов: a={result.right_line_fit.slope:.6g}, b={result.right_line_fit.intercept:.6g}."
+            f"Правая линия максимумов: {result.right_line_fit.equation(6)}."
         )
         self.save_button.setEnabled(True)
 

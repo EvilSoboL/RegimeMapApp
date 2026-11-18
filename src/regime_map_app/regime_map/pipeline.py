@@ -7,7 +7,7 @@ import numpy as np
 from ..diff_surface.exceptions import CancellationError as DiffSurfaceCancellationError
 from ..diff_surface.exceptions import DiffSurfaceError
 from ..diff_surface.models import DiffSurfaceJobConfig, MaximaDetectionMethod, SurfaceMode
-from ..diff_surface.pipeline import DiffSurfacePipeline
+from ..diff_surface.pipeline import CO_MINIMUM_TOLERANCE, DiffSurfacePipeline
 from ..diff_surface.validation import parse_contour_level_indices
 from .cmaps import DEFAULT_CMAP_NAME, resolve_cmap_name
 from .exceptions import CancellationError, ProcessingError, ValidationError
@@ -27,7 +27,6 @@ from .validation import validate_job_config
 LogCallback = Callable[[str], None]
 ProgressCallback = Callable[[int], None]
 CancelCallback = Callable[[], bool]
-CO_MINIMUM_TOLERANCE = 10.0
 
 
 class RegimeMapPipeline:
@@ -86,11 +85,8 @@ class RegimeMapPipeline:
             )
             if needs_min_line:
                 tolerance = CO_MINIMUM_TOLERANCE if config.is_co_component else 0.0
-                valley_fuel = self.find_minimum_path(
-                    component_grid, fuel_axis, tolerance, should_cancel,
-                )
-                fit = self.diff_pipeline.fit_line(
-                    np.column_stack((additive_axis, valley_fuel)), "линии минимальной концентрации",
+                _, fit = self.diff_pipeline.fit_minimum_line(
+                    component_grid, fuel_axis, additive_axis, tolerance, should_cancel,
                 )
                 minimum_fuel = fit.slope * additive_axis + fit.intercept
                 minima_points = np.column_stack((minimum_fuel, additive_axis))
@@ -100,7 +96,7 @@ class RegimeMapPipeline:
                     )
                 if needs_right_line:
                     maxima_detection_method = config.maxima_detection_method
-                    right_fuel, analysis_contour_indices, analysis_contour_values = self.find_right_path(
+                    right_fuel, analysis_contour_indices, analysis_contour_values = self.fit_right_line(
                         config, component_grid, fuel_axis, additive_axis, minimum_fuel,
                     )
                     right_points = np.column_stack((right_fuel, additive_axis))
@@ -139,58 +135,7 @@ class RegimeMapPipeline:
             font_size=int(config.font_size),
         )
 
-    def find_minimum_path(
-        self, grid: np.ndarray, fuel: np.ndarray, tolerance: float,
-        should_cancel: CancelCallback | None = None,
-    ) -> np.ndarray:
-        row_minima = grid.min(axis=1)
-        candidates = [np.flatnonzero(row <= minimum + tolerance) for row, minimum in zip(grid, row_minima)]
-        centers = np.array([fuel[indices].mean() for indices in candidates])
-        indices = np.empty(len(grid), dtype=int)
-        previous_fuel = centers[0]
-        for row_index, choices in enumerate(candidates):
-            self._check_cancel(should_cancel)
-            # Use neighboring slice centers to anticipate the direction of the valley.
-            center = centers[max(0, row_index - 1):row_index + 2].mean()
-            target = (center + previous_fuel) / 2 if row_index else center
-            nearest = choices[np.argmin(abs(fuel[choices] - target))]
-            if row_index:
-                previous_index = indices[row_index - 1]
-                lower = grid[row_index - 1] - row_minima[row_index - 1]
-                upper = grid[row_index] - row_minima[row_index]
-                # Test the preferred continuation first, then the closest feasible one.
-                ordered = choices[np.argsort(abs(fuel[choices] - target), kind="stable")]
-                for choice in ordered:
-                    if self._segment_stays_in_band(fuel, lower, upper, previous_index, choice, tolerance):
-                        nearest = choice
-                        break
-            indices[row_index] = nearest
-            previous_fuel = fuel[nearest]
-        return fuel[indices]
-
-    @staticmethod
-    def _segment_stays_in_band(
-        fuel: np.ndarray, lower: np.ndarray, upper: np.ndarray, start: int, end: int, tolerance: float,
-    ) -> bool:
-        if start == end:
-            return True
-        left, right = sorted((start, end))
-        columns = slice(left, right + 1)
-        fraction = (fuel[columns] - fuel[start]) / (fuel[end] - fuel[start])
-        low, high = lower[columns], upper[columns]
-        values = low + fraction * (high - low)
-        limit = tolerance + 1e-9
-        if np.any(values > limit):
-            return False
-        # Within each crossed cell the bilinear interpolation along the segment is quadratic.
-        quadratic = np.diff(fraction) * np.diff(high - low)
-        linear = np.diff(values) - quadratic
-        concave = quadratic < 0
-        vertex = np.clip(-linear[concave] / (2 * quadratic[concave]), 0, 1)
-        peaks = values[:-1][concave] + vertex * (linear[concave] + vertex * quadratic[concave])
-        return bool(np.all(peaks <= limit))
-
-    def find_right_path(
+    def fit_right_line(
         self, config: RegimeMapJobConfig, grid: np.ndarray, fuel: np.ndarray,
         additive: np.ndarray, minimum_fuel: np.ndarray,
     ) -> tuple[np.ndarray, tuple[int, ...], tuple[float, ...]]:
@@ -199,21 +144,25 @@ class RegimeMapPipeline:
         if config.maxima_detection_method is MaximaDetectionMethod.ROW_PEAKS:
             right_side = fuel > minimum_fuel[:, None]
             maxima = np.argmax(np.where(right_side, gradient, -np.inf), axis=1)
-            return np.where(right_side.any(axis=1), fuel[maxima], np.nan), (), ()
-
-        indices = parse_contour_level_indices(config.contour_levels_text)
-        values = self.diff_pipeline.resolve_contour_level_values(gradient, indices)
-        points = self.diff_pipeline.extract_contour_points(gradient, fuel, additive, values)
-        right = points[points[:, 0] > np.interp(points[:, 1], additive, minimum_fuel)]
+            supported = right_side.any(axis=1)
+            right = np.column_stack((fuel[maxima[supported]], additive[supported]))
+            indices, values = (), ()
+        else:
+            indices = parse_contour_level_indices(config.contour_levels_text)
+            values = self.diff_pipeline.resolve_contour_level_values(gradient, indices)
+            points = self.diff_pipeline.extract_contour_points(gradient, fuel, additive, values)
+            right = points[points[:, 0] > np.interp(points[:, 1], additive, minimum_fuel)]
         right_fuel = np.full_like(additive, np.nan)
         if np.unique(right[:, 1]).size >= 2:
-            slope, intercept = np.polyfit(right[:, 1], right[:, 0], deg=1)
-            estimate = slope * additive + intercept
-            supported = (
-                (additive >= right[:, 1].min()) & (additive <= right[:, 1].max())
-                & (estimate > minimum_fuel) & (estimate <= fuel[-1])
+            fit = self.diff_pipeline.fit_line(
+                right, "правой линии максимумов", fuel_from_additive=True,
             )
-            right_fuel[supported] = estimate[supported]
+            estimate = fit.slope * additive + fit.intercept
+            visible = (
+                (additive >= right[:, 1].min()) & (additive <= right[:, 1].max())
+                & (estimate > minimum_fuel)
+            )
+            right_fuel[visible] = estimate[visible]
         return right_fuel, indices, values
 
     def resolve_co_levels(self, config: RegimeMapJobConfig) -> int | np.ndarray:

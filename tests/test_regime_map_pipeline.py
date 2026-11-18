@@ -110,7 +110,7 @@ def test_minimum_line_fits_a_straight_line_to_the_bent_valley(tmp_path: Path) ->
 
     pipeline = RegimeMapPipeline()
     result = pipeline.process_job(RegimeMapJobConfig(input_path=input_file, show_min_line=True))
-    valley_fuel = pipeline.find_minimum_path(result.component_grid, result.fuel_axis, 10.0)
+    valley_fuel = pipeline.diff_pipeline.find_minimum_path(result.component_grid, result.fuel_axis, 10.0)
 
     assert result.minima_points[:, 1] == pytest.approx(np.arange(5))
     assert valley_fuel == pytest.approx([1, 1, 1, 2, 4])
@@ -164,6 +164,9 @@ def test_process_job_uses_slice_paths_with_auto_ranges_and_non_co_overlay_rules(
     assert result.mean_points[valid, 0] == pytest.approx(
         (result.minima_points[valid, 0] + result.right_points[valid, 0]) / 2
     )
+    assert valid.sum() >= 3
+    np.testing.assert_allclose(np.diff(result.right_points[valid, 0], n=2), 0.0, atol=1e-12)
+    np.testing.assert_allclose(np.diff(result.mean_points[valid, 0], n=2), 0.0, atol=1e-12)
 
 
 def test_process_job_builds_map_without_line_calculations_when_checkboxes_are_disabled(tmp_path: Path) -> None:

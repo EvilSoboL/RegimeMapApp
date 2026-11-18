@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
+from ..approx.exceptions import ValidationError as MetadataError
+from ..approx.validation import parse_file_metadata
 from .exceptions import CancellationError, CsvValidationError, DiffSurfaceError, ProcessingError, ValidationError
 from .models import (
     CSV_SEPARATOR,
@@ -23,6 +25,7 @@ from .models import (
 from .validation import parse_contour_level_indices, validate_job_config
 
 ALTERNATIVE_CSV_DELIMITERS = (",", "\t", "|")
+CO_MINIMUM_TOLERANCE = 10.0
 
 LogCallback = Callable[[str], None]
 ProgressCallback = Callable[[int], None]
@@ -168,6 +171,67 @@ class DiffSurfacePipeline:
         min_indices = np.argmin(component_grid, axis=0)
         return np.column_stack((fuel_axis, additive_axis[min_indices])).astype(float)
 
+    def find_minimum_path(
+        self, grid: np.ndarray, fuel: np.ndarray, tolerance: float,
+        should_cancel: CancelCallback | None = None,
+    ) -> np.ndarray:
+        row_minima = grid.min(axis=1)
+        candidates = [np.flatnonzero(row <= minimum + tolerance) for row, minimum in zip(grid, row_minima)]
+        centers = np.array([fuel[indices].mean() for indices in candidates])
+        indices = np.empty(len(grid), dtype=int)
+        previous_fuel = centers[0]
+        for row_index, choices in enumerate(candidates):
+            self._check_cancel(should_cancel)
+            # Use neighboring slice centers to anticipate the direction of the valley.
+            center = centers[max(0, row_index - 1):row_index + 2].mean()
+            target = (center + previous_fuel) / 2 if row_index else center
+            nearest = choices[np.argmin(abs(fuel[choices] - target))]
+            if row_index:
+                previous_index = indices[row_index - 1]
+                lower = grid[row_index - 1] - row_minima[row_index - 1]
+                upper = grid[row_index] - row_minima[row_index]
+                # Test the preferred continuation first, then the closest feasible one.
+                ordered = choices[np.argsort(abs(fuel[choices] - target), kind="stable")]
+                for choice in ordered:
+                    if self._segment_stays_in_band(fuel, lower, upper, previous_index, choice, tolerance):
+                        nearest = choice
+                        break
+            indices[row_index] = nearest
+            previous_fuel = fuel[nearest]
+        return fuel[indices]
+
+    def fit_minimum_line(
+        self, grid: np.ndarray, fuel: np.ndarray, additive: np.ndarray,
+        tolerance: float, should_cancel: CancelCallback | None = None,
+    ) -> tuple[np.ndarray, LineFit]:
+        valley_fuel = self.find_minimum_path(grid, fuel, tolerance, should_cancel)
+        points = np.column_stack((valley_fuel, additive))
+        return points, self.fit_line(
+            points, "линии минимальной концентрации", fuel_from_additive=True,
+        )
+
+    @staticmethod
+    def _segment_stays_in_band(
+        fuel: np.ndarray, lower: np.ndarray, upper: np.ndarray, start: int, end: int, tolerance: float,
+    ) -> bool:
+        if start == end:
+            return True
+        left, right = sorted((start, end))
+        columns = slice(left, right + 1)
+        fraction = (fuel[columns] - fuel[start]) / (fuel[end] - fuel[start])
+        low, high = lower[columns], upper[columns]
+        values = low + fraction * (high - low)
+        limit = tolerance + 1e-9
+        if np.any(values > limit):
+            return False
+        # Within each crossed cell the bilinear interpolation along the segment is quadratic.
+        quadratic = np.diff(fraction) * np.diff(high - low)
+        linear = np.diff(values) - quadratic
+        concave = quadratic < 0
+        vertex = np.clip(-linear[concave] / (2 * quadratic[concave]), 0, 1)
+        peaks = values[:-1][concave] + vertex * (linear[concave] + vertex * quadratic[concave])
+        return bool(np.all(peaks <= limit))
+
     def find_peak_pair_points(
         self,
         surface: np.ndarray,
@@ -199,10 +263,14 @@ class DiffSurfacePipeline:
         points: np.ndarray,
         reference_line_fit: LineFit,
     ) -> tuple[np.ndarray, np.ndarray]:
-        reference_line_values = reference_line_fit.slope * points[:, 0] + reference_line_fit.intercept
         tolerance = 1e-9
-        left_points = points[points[:, 1] >= reference_line_values - tolerance]
-        right_points = points[points[:, 1] < reference_line_values - tolerance]
+        if reference_line_fit.fuel_from_additive:
+            reference_fuel = reference_line_fit.slope * points[:, 1] + reference_line_fit.intercept
+            on_left = points[:, 0] <= reference_fuel + tolerance
+        else:
+            reference_additive = reference_line_fit.slope * points[:, 0] + reference_line_fit.intercept
+            on_left = points[:, 1] >= reference_additive - tolerance
+        left_points, right_points = points[on_left], points[~on_left]
 
         if len(left_points) == 0 or len(right_points) == 0:
             raise ProcessingError(
@@ -363,18 +431,22 @@ class DiffSurfacePipeline:
             raise ProcessingError("Не удалось выделить две разные точки максимумов на строке дифференциальной поверхности.")
         return left_index, right_index
 
-    def fit_line(self, points: np.ndarray, line_label: str) -> LineFit:
+    def fit_line(
+        self, points: np.ndarray, line_label: str, *, fuel_from_additive: bool = False,
+    ) -> LineFit:
         if len(points) < 2:
             raise ProcessingError(f"Для аппроксимации {line_label} нужны минимум две точки.")
-        if np.unique(points[:, 0]).size < 2:
-            raise ProcessingError(f"Для аппроксимации {line_label} нужны точки с разными значениями fuel.")
+        x, y = points.T[::-1] if fuel_from_additive else points.T
+        if np.unique(x).size < 2:
+            variable = "additive" if fuel_from_additive else "fuel"
+            raise ProcessingError(f"Для аппроксимации {line_label} нужны точки с разными значениями {variable}.")
         try:
-            slope, intercept = np.polyfit(points[:, 0], points[:, 1], deg=1)
+            slope, intercept = np.polyfit(x, y, deg=1)
         except Exception as exc:
             raise ProcessingError(f"Не удалось аппроксимировать {line_label}: {exc}") from exc
         if not np.isfinite((slope, intercept)).all():
             raise ProcessingError(f"Коэффициенты {line_label} получились некорректными.")
-        return LineFit(slope=float(slope), intercept=float(intercept))
+        return LineFit(float(slope), float(intercept), fuel_from_additive)
 
     def _sort_points(self, points: np.ndarray) -> np.ndarray:
         order = np.lexsort((points[:, 0], points[:, 1]))
@@ -413,8 +485,14 @@ class DiffSurfacePipeline:
         self._emit_progress(on_progress, 60)
 
         self._check_cancel(should_cancel)
-        minima_points = self.find_minima_points(component_grid, fuel_axis, additive_axis)
-        minima_line_fit = self.fit_line(minima_points, "линии минимумов концентрации")
+        try:
+            is_co = parse_file_metadata(config.input_path).component_name.casefold() == "co"
+        except MetadataError:
+            is_co = False
+        tolerance = CO_MINIMUM_TOLERANCE if is_co else 0.0
+        minima_points, minima_line_fit = self.fit_minimum_line(
+            component_grid, fuel_axis, additive_axis, tolerance, should_cancel,
+        )
         left_maxima_points, right_maxima_points, contour_level_indices, contour_level_values = self.find_maxima_points(
             selected_surface,
             fuel_axis,
@@ -429,24 +507,30 @@ class DiffSurfacePipeline:
                 for index, value in zip(contour_level_indices, contour_level_values)
             )
             self._emit_log(on_log, f"Для анализа использованы линии уровня: {contour_details}.")
-        self._emit_log(on_log, f"Найдено точек максимумов слева выше линии минимума: {len(left_maxima_points)}.")
-        self._emit_log(on_log, f"Найдено точек максимумов справа ниже линии минимума: {len(right_maxima_points)}.")
+        self._emit_log(on_log, f"Найдено точек максимумов слева от линии минимума: {len(left_maxima_points)}.")
+        self._emit_log(on_log, f"Найдено точек максимумов справа от линии минимума: {len(right_maxima_points)}.")
         self._emit_progress(on_progress, 80)
 
         self._check_cancel(should_cancel)
-        left_line_fit = self.fit_line(left_maxima_points, "левой линии максимумов")
-        right_line_fit = self.fit_line(right_maxima_points, "правой линии максимумов")
-        self._emit_log(
-            on_log,
-            f"Линия минимумов концентрации: additive = {minima_line_fit.slope:.6g} * fuel + {minima_line_fit.intercept:.6g}",
+        left_line_fit = self.fit_line(
+            left_maxima_points, "левой линии максимумов",
+            fuel_from_additive=np.unique(left_maxima_points[:, 0]).size == 1,
+        )
+        right_line_fit = self.fit_line(
+            right_maxima_points, "правой линии максимумов",
+            fuel_from_additive=np.unique(right_maxima_points[:, 0]).size == 1,
         )
         self._emit_log(
             on_log,
-            f"Левая линия максимумов: additive = {left_line_fit.slope:.6g} * fuel + {left_line_fit.intercept:.6g}",
+            f"Линия минимумов концентрации: {minima_line_fit.equation(6)}",
         )
         self._emit_log(
             on_log,
-            f"Правая линия максимумов: additive = {right_line_fit.slope:.6g} * fuel + {right_line_fit.intercept:.6g}",
+            f"Левая линия максимумов: {left_line_fit.equation(6)}",
+        )
+        self._emit_log(
+            on_log,
+            f"Правая линия максимумов: {right_line_fit.equation(6)}",
         )
         self._emit_progress(on_progress, 100)
 
